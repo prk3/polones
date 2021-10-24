@@ -1,0 +1,17 @@
+[package]
+name = "nes"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "nes_desktop"
+path = "src/nes_desktop.rs"
+
+[lib]
+name = "nes_lib"
+path = "src/nes_lib.rs"
+
+[dependencies]
+sdl2 = "0.34.2"

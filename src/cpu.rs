@@ -1,15 +1,13 @@
-use std::marker::PhantomData;
+use super::nes::Nes;
 
-use super::bus::Bus;
-
-pub struct Cpu<B> {
+pub struct Cpu {
     // registers
-    accumulator: u8,
-    x_index: u8,
-    y_index: u8,
-    program_counter: u16,
-    stack_pointer: u8,
-    status_register: StatusRegister,
+    pub accumulator: u8,
+    pub x_index: u8,
+    pub y_index: u8,
+    pub program_counter: u16,
+    pub stack_pointer: u8,
+    pub status_register: StatusRegister,
 
     // other
     opcode: u8, // the opcode that is currently being handled
@@ -18,14 +16,11 @@ pub struct Cpu<B> {
     operand_accumulator: bool, // whether the operand is accumulator
     crossed_page_boundary: bool, // whether sleep cycles might be increased by crossing the page boundary
     program_counter_offset: i8, // relative jump target (for branch instructions)
-
-    // for generic bus
-    _bus: PhantomData<B>,
 }
 
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
-impl<B: Bus> Cpu<B> {
+impl Cpu {
     pub fn new() -> Self {
         Self {
             accumulator: 0,
@@ -41,14 +36,12 @@ impl<B: Bus> Cpu<B> {
             operand_accumulator: false,
             crossed_page_boundary: false,
             program_counter_offset: 0,
-
-            _bus: PhantomData::default(),
         }
     }
     // thanks
     // https://masswerk.at/6502/6502_instruction_set.html
 
-    const INSTRUCTION_SET: [fn (cpu: &mut Self, bus: &B); 256] = [
+    const INSTRUCTION_SET: [fn (cpu: &mut Self, nes: &Nes); 256] = [
         /* HI   LO    0             1             2             3             4             5             6             7             8             9             A             B             C             D             E             F    */
         /* 0 */ Self::run_00, Self::run_01, Self::run_xx, Self::run_xx, Self::run_xx, Self::run_05, Self::run_06, Self::run_xx, Self::run_08, Self::run_09, Self::run_0A, Self::run_xx, Self::run_xx, Self::run_0D, Self::run_0E, Self::run_xx,
         /* 1 */ Self::run_10, Self::run_11, Self::run_xx, Self::run_xx, Self::run_xx, Self::run_15, Self::run_16, Self::run_xx, Self::run_18, Self::run_19, Self::run_xx, Self::run_xx, Self::run_xx, Self::run_1D, Self::run_1E, Self::run_xx,
@@ -68,55 +61,59 @@ impl<B: Bus> Cpu<B> {
         /* F */ Self::run_F0, Self::run_F1, Self::run_xx, Self::run_xx, Self::run_xx, Self::run_F5, Self::run_F6, Self::run_xx, Self::run_F8, Self::run_F9, Self::run_xx, Self::run_xx, Self::run_xx, Self::run_FD, Self::run_FE, Self::run_xx,
     ];
 
-    pub fn reset(&mut self, bus: &B) {
-        let low = bus.read(0xFFFC);
-        let high = bus.read(0xFFFC + 1);
+    pub fn reset(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(0xFFFC);
+        let high = nes.cpu_bus_read(0xFFFC + 1);
         self.program_counter = ((high as u16) << 8) | low as u16;
         self.sleep_cycles = 8;
     }
 
-    pub fn tick(&mut self, bus: &B) {
+    pub fn mni(&mut self) {
+        todo!()
+    }
+
+    pub fn tick(&mut self, nes: &Nes) {
         if self.sleep_cycles > 0 {
             self.sleep_cycles -= 1;
             return
         }
 
-        self.opcode = bus.read(self.program_counter);
+        self.opcode = nes.cpu_bus_read(self.program_counter);
         self.sleep_cycles = 0;
         self.operand_address = 0;
         self.operand_accumulator = false;
         self.program_counter_offset = 0;
         self.crossed_page_boundary = false;
 
-        Self::INSTRUCTION_SET[self.opcode as usize](self, bus);
+        Self::INSTRUCTION_SET[self.opcode as usize](self, nes);
     }
 
-    pub fn run_one_instruction(&mut self, bus: &B) {
+    pub fn run_one_instruction(&mut self, nes: &Nes) {
         self.sleep_cycles = 0;
-        self.tick(bus);
+        self.tick(nes);
         self.sleep_cycles = 0;
     }
 
-    fn get_operand_byte(&self, bus: &B) -> u8 {
+    fn get_operand_byte(&self, nes: &Nes) -> u8 {
         if self.operand_accumulator {
             self.accumulator
         } else {
-            bus.read(self.operand_address)
+            nes.cpu_bus_read(self.operand_address)
         }
     }
 
-    fn set_operand_byte(&mut self, bus: &B, byte: u8) {
+    fn set_operand_byte(&mut self, nes: &Nes, byte: u8) {
         if self.operand_accumulator {
             self.accumulator = byte;
         } else {
-            bus.write(self.operand_address, byte)
+            nes.cpu_bus_write(self.operand_address, byte)
         }
     }
 
     // Helper function for all kind of branch instruction.
     // Branches to pc + program_counter_offset.
     // Adds 1 or 2 sleep cycles, depending on the jump address.
-    fn branch(&mut self, bus: &B) {
+    fn branch(&mut self, nes: &Nes) {
         let old_program_counter = self.program_counter;
 
         self.program_counter = u16_address_offset(self.program_counter, self.program_counter_offset);
@@ -130,18 +127,18 @@ impl<B: Bus> Cpu<B> {
 
     // address modes
 
-    fn address_mode_absolute(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
-        let high = bus.read(self.program_counter.wrapping_add(2));
+    fn address_mode_absolute(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
+        let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_address = ((high as u16) << 8) | (low as u16);
 
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
-    fn address_mode_absolute_x_indexed(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
-        let high = bus.read(self.program_counter.wrapping_add(2));
+    fn address_mode_absolute_x_indexed(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
+        let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.x_index as u16);
 
@@ -152,9 +149,9 @@ impl<B: Bus> Cpu<B> {
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
-    fn address_mode_absolute_y_indexed(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
-        let high = bus.read(self.program_counter.wrapping_add(2));
+    fn address_mode_absolute_y_indexed(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
+        let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.y_index as u16);
 
@@ -165,48 +162,48 @@ impl<B: Bus> Cpu<B> {
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
-    fn address_mode_immediate(&mut self, bus: &B) {
+    fn address_mode_immediate(&mut self, nes: &Nes) {
         self.operand_address = self.program_counter.wrapping_add(1);
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_implied(&mut self, bus: &B) {
+    fn address_mode_implied(&mut self, nes: &Nes) {
         self.program_counter = self.program_counter.wrapping_add(1);
     }
 
-    fn address_mode_indirect(&mut self, bus: &B) {
-        let ptr_low = bus.read(self.program_counter.wrapping_add(1));
-        let ptr_high = bus.read(self.program_counter.wrapping_add(2));
+    fn address_mode_indirect(&mut self, nes: &Nes) {
+        let ptr_low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
+        let ptr_high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         let ptr = ((ptr_high as u16) << 8) | ptr_low as u16;
 
-        let low = bus.read(ptr);
-        let high = bus.read(ptr.wrapping_add(1));
+        let low = nes.cpu_bus_read(ptr);
+        let high = nes.cpu_bus_read(ptr.wrapping_add(1));
 
         self.operand_address = ((high as u16) << 8) | (low as u16);
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
-    fn address_mode_x_indexed_indirect(&mut self, bus: &B) {
-        let ptr_low = bus.read(self.program_counter.wrapping_add(1)).wrapping_add(self.x_index);
+    fn address_mode_x_indexed_indirect(&mut self, nes: &Nes) {
+        let ptr_low = nes.cpu_bus_read(self.program_counter.wrapping_add(1)).wrapping_add(self.x_index);
 
         let ptr = ptr_low as u16;
 
-        let low = bus.read(ptr);
-        let high = bus.read((ptr + 1) & 0x00FF);
+        let low = nes.cpu_bus_read(ptr);
+        let high = nes.cpu_bus_read((ptr + 1) & 0x00FF);
 
         self.operand_address = ((high as u16) << 8) | (low as u16);
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_indirect_y_indexed(&mut self, bus: &B) {
-        let ptr_low = bus.read(self.program_counter.wrapping_add(1));
+    fn address_mode_indirect_y_indexed(&mut self, nes: &Nes) {
+        let ptr_low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
         let ptr = ptr_low as u16;
 
-        let low = bus.read(ptr);
-        let high = bus.read((ptr + 1) & 0x00FF);
+        let low = nes.cpu_bus_read(ptr);
+        let high = nes.cpu_bus_read((ptr + 1) & 0x00FF);
 
         self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
 
@@ -217,30 +214,30 @@ impl<B: Bus> Cpu<B> {
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_relative(&mut self, bus: &B) {
-        self.program_counter_offset = u8_to_i8(bus.read(self.program_counter.wrapping_add(1)));
+    fn address_mode_relative(&mut self, nes: &Nes) {
+        self.program_counter_offset = u8_to_i8(nes.cpu_bus_read(self.program_counter.wrapping_add(1)));
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_zeropage(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
+    fn address_mode_zeropage(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
         self.operand_address = low as u16;
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_zeropage_x_indexed(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
+    fn address_mode_zeropage_x_indexed(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
         self.operand_address = low.wrapping_add(self.x_index) as u16;
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_zeropage_y_indexed(&mut self, bus: &B) {
-        let low = bus.read(self.program_counter.wrapping_add(1));
+    fn address_mode_zeropage_y_indexed(&mut self, nes: &Nes) {
+        let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
         self.operand_address = low.wrapping_add(self.y_index) as u16;
 
@@ -250,8 +247,8 @@ impl<B: Bus> Cpu<B> {
     // operations
 
     // ADC
-    fn add_with_carry(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn add_with_carry(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
         let sum = (self.accumulator as u16).wrapping_add(operand_byte as u16).wrapping_add(self.status_register.get_carry() as u16);
@@ -264,8 +261,8 @@ impl<B: Bus> Cpu<B> {
     }
 
     // AND
-    fn and(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn and(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
         self.accumulator = old_accumulator.wrapping_add(operand_byte).wrapping_add(self.status_register.get_carry() as u8);
@@ -275,8 +272,8 @@ impl<B: Bus> Cpu<B> {
     }
 
     // ASL
-    fn arithmetic_shift_left(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn arithmetic_shift_left(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let carry = operand_byte & 0b10000000;
 
         self.accumulator = (self.accumulator & 0b01111111) << 1;
@@ -287,29 +284,29 @@ impl<B: Bus> Cpu<B> {
     }
 
     // BCC
-    fn branch_on_carry_clear(&mut self, bus: &B) {
+    fn branch_on_carry_clear(&mut self, nes: &Nes) {
         if !self.status_register.get_carry() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BCS
-    fn branch_on_carry_set(&mut self, bus: &B) {
+    fn branch_on_carry_set(&mut self, nes: &Nes) {
         if self.status_register.get_carry() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BCS
-    fn branch_on_equal(&mut self, bus: &B) {
+    fn branch_on_equal(&mut self, nes: &Nes) {
         if self.status_register.get_zero() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BCS
-    fn bit_test(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn bit_test(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let accumulator_and_operand = self.accumulator & operand_byte;
 
         self.status_register.set_negative(operand_byte & 0b10000000 > 0);
@@ -318,33 +315,33 @@ impl<B: Bus> Cpu<B> {
     }
 
     // BMI
-    fn branch_on_minus(&mut self, bus: &B) {
+    fn branch_on_minus(&mut self, nes: &Nes) {
         if self.status_register.get_negative() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BNE
-    fn branch_on_not_equal(&mut self, bus: &B) {
+    fn branch_on_not_equal(&mut self, nes: &Nes) {
         if !self.status_register.get_zero() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BPL
-    fn branch_on_plus(&mut self, bus: &B) {
+    fn branch_on_plus(&mut self, nes: &Nes) {
         if !self.status_register.get_negative() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BRK
-    fn break_or_interrupt(&mut self, bus: &B) {
+    fn break_or_interrupt(&mut self, nes: &Nes) {
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
         let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
         let low = self.program_counter.wrapping_add(2) as u8;
-        bus.write(0x0100 + self.stack_pointer as u16, high);
-        bus.write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, low);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, high);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, low);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let mut status_register = self.status_register;
@@ -353,42 +350,42 @@ impl<B: Bus> Cpu<B> {
     }
 
     // BVC
-    fn branch_on_overflow_clear(&mut self, bus: &B) {
+    fn branch_on_overflow_clear(&mut self, nes: &Nes) {
         if !self.status_register.get_overflow() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // BVS
-    fn branch_on_overflow_set(&mut self, bus: &B) {
+    fn branch_on_overflow_set(&mut self, nes: &Nes) {
         if self.status_register.get_overflow() {
-            self.branch(bus);
+            self.branch(nes);
         }
     }
 
     // CLC
-    fn clear_carry(&mut self, bus: &B) {
+    fn clear_carry(&mut self, nes: &Nes) {
         self.status_register.set_carry(false);
     }
 
     // CLD
-    fn clear_decimal(&mut self, bus: &B) {
+    fn clear_decimal(&mut self, nes: &Nes) {
         self.status_register.set_decimal(false);
     }
 
     // CLI
-    fn clear_interrupt_disable(&mut self, bus: &B) {
+    fn clear_interrupt_disable(&mut self, nes: &Nes) {
         self.status_register.set_interrupt(false);
     }
 
     // CLV
-    fn clear_overflow(&mut self, bus: &B) {
+    fn clear_overflow(&mut self, nes: &Nes) {
         self.status_register.set_overflow(false);
     }
 
     // CMP
-    fn compare(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn compare(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let accumulator_minus_operand = self.accumulator.wrapping_sub(operand_byte);
         self.status_register.set_negative(accumulator_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(accumulator_minus_operand == 0);
@@ -396,8 +393,8 @@ impl<B: Bus> Cpu<B> {
     }
 
     // CPX
-    fn compare_with_x(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn compare_with_x(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let x_minus_operand = self.x_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(x_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(x_minus_operand == 0);
@@ -405,8 +402,8 @@ impl<B: Bus> Cpu<B> {
     }
 
     // CPY
-    fn compare_with_y(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn compare_with_y(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let y_minus_operand = self.x_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(y_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(y_minus_operand == 0);
@@ -414,140 +411,140 @@ impl<B: Bus> Cpu<B> {
     }
 
     // DEC
-    fn decrement(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus).wrapping_sub(1);
+    fn decrement(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes).wrapping_sub(1);
         self.status_register.set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
-        self.set_operand_byte(bus, operand_byte);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // DEX
-    fn decrement_x(&mut self, bus: &B) {
+    fn decrement_x(&mut self, nes: &Nes) {
         self.x_index = self.x_index.wrapping_sub(1);
         self.status_register.set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // DEY
-    fn decrement_y(&mut self, bus: &B) {
+    fn decrement_y(&mut self, nes: &Nes) {
         self.y_index = self.y_index.wrapping_sub(1);
         self.status_register.set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
     // EOR
-    fn exclusive_or(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn exclusive_or(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         self.accumulator = self.accumulator ^ operand_byte;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // INC
-    fn increment(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus).wrapping_add(1);
+    fn increment(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes).wrapping_add(1);
         self.status_register.set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
-        self.set_operand_byte(bus, operand_byte);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // INX
-    fn increment_x(&mut self, bus: &B) {
+    fn increment_x(&mut self, nes: &Nes) {
         self.x_index = self.x_index.wrapping_add(1);
         self.status_register.set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // INY
-    fn increment_y(&mut self, bus: &B) {
+    fn increment_y(&mut self, nes: &Nes) {
         self.y_index = self.y_index.wrapping_add(1);
         self.status_register.set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
     // JMP
-    fn jump(&mut self, bus: &B) {
+    fn jump(&mut self, nes: &Nes) {
         self.program_counter = self.operand_address;
     }
 
     // JSR
-    fn jump_subroutine(&mut self, bus: &B) {
+    fn jump_subroutine(&mut self, nes: &Nes) {
         let program_counter_to_save = self.program_counter.wrapping_sub(1);
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        bus.write(0x0100 + self.stack_pointer as u16, (program_counter_to_save >> 8) as u8);
-        bus.write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, program_counter_to_save as u8);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, (program_counter_to_save >> 8) as u8);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, program_counter_to_save as u8);
         self.program_counter = self.operand_address;
     }
 
     // LDA
-    fn load_accumulator(&mut self, bus: &B) {
-        self.accumulator = self.get_operand_byte(bus);
+    fn load_accumulator(&mut self, nes: &Nes) {
+        self.accumulator = self.get_operand_byte(nes);
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // LDX
-    fn load_x(&mut self, bus: &B) {
-        self.x_index = self.get_operand_byte(bus);
+    fn load_x(&mut self, nes: &Nes) {
+        self.x_index = self.get_operand_byte(nes);
         self.status_register.set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // LDY
-    fn load_y(&mut self, bus: &B) {
-        self.y_index = self.get_operand_byte(bus);
+    fn load_y(&mut self, nes: &Nes) {
+        self.y_index = self.get_operand_byte(nes);
         self.status_register.set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
     // LSR
-    fn logical_shift_right(&mut self, bus: &B) {
-        let mut operand_byte = self.get_operand_byte(bus);
+    fn logical_shift_right(&mut self, nes: &Nes) {
+        let mut operand_byte = self.get_operand_byte(nes);
         let leftmost_bit = operand_byte & 1;
         operand_byte = operand_byte >> 1;
         self.status_register.set_negative(false);
         self.status_register.set_zero(operand_byte == 0);
         self.status_register.set_carry(leftmost_bit > 0);
-        self.set_operand_byte(bus, operand_byte);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // NOP
-    fn no_operation(&mut self, bus: &B) {}
+    fn no_operation(&mut self, nes: &Nes) {}
 
     // ORA
-    fn or_with_accumulator(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn or_with_accumulator(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         self.accumulator = self.accumulator | operand_byte;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // PHA
-    fn push_accumulator(&mut self, bus: &B) {
+    fn push_accumulator(&mut self, nes: &Nes) {
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
-        bus.write(0x0100 + self.stack_pointer as u16, self.accumulator);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, self.accumulator);
     }
 
     // PHP
-    fn push_processor_status(&mut self, bus: &B) {
+    fn push_processor_status(&mut self, nes: &Nes) {
         let mut status_register_copy = self.status_register;
         status_register_copy.set_ignored(true);
         status_register_copy.set_break(true);
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
-        bus.write(0x0100 + self.stack_pointer as u16, status_register_copy.0);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, status_register_copy.0);
     }
 
     // PLA
-    fn pull_accumulator(&mut self, bus: &B) {
-        self.accumulator = bus.read(0x0100 + self.stack_pointer as u16);
+    fn pull_accumulator(&mut self, nes: &Nes) {
+        self.accumulator = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // PLP
-    fn pull_processor_status(&mut self, bus: &B) {
-        let mut processor_status = StatusRegister(bus.read(0x0100 + self.stack_pointer as u16));
+    fn pull_processor_status(&mut self, nes: &Nes) {
+        let mut processor_status = StatusRegister(nes.cpu_bus_read(0x0100 + self.stack_pointer as u16));
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         processor_status.set_ignored(false);
         processor_status.set_break(false);
@@ -555,49 +552,49 @@ impl<B: Bus> Cpu<B> {
     }
 
     // ROL
-    fn rotate_left(&mut self, bus: &B) {
-        let mut operand_byte = self.get_operand_byte(bus);
+    fn rotate_left(&mut self, nes: &Nes) {
+        let mut operand_byte = self.get_operand_byte(nes);
         let leftmost_bit = operand_byte & 0b10000000;
         operand_byte = (operand_byte << 1) | self.status_register.get_carry() as u8;
         self.status_register.set_carry(leftmost_bit > 0);
         self.status_register.set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
-        self.set_operand_byte(bus, operand_byte);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // ROR
-    fn rotate_right(&mut self, bus: &B) {
-        let mut operand_byte = self.get_operand_byte(bus);
+    fn rotate_right(&mut self, nes: &Nes) {
+        let mut operand_byte = self.get_operand_byte(nes);
         let rightmost_bit = operand_byte & 1;
         operand_byte = (operand_byte >> 1) | ((self.status_register.get_carry() as u8) << 7);
         self.status_register.set_carry(rightmost_bit > 0);
         self.status_register.set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
-        self.set_operand_byte(bus, operand_byte);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // RTI
-    fn return_from_interrupt(&mut self, bus: &B) {
-        self.status_register = StatusRegister(bus.read(self.stack_pointer as u16));
+    fn return_from_interrupt(&mut self, nes: &Nes) {
+        self.status_register = StatusRegister(nes.cpu_bus_read(self.stack_pointer as u16));
         self.status_register.set_break(false);
         self.status_register.set_ignored(false);
-        let high = bus.read(self.stack_pointer.wrapping_add(1) as u16);
-        let low = bus.read(self.stack_pointer.wrapping_add(2) as u16);
+        let high = nes.cpu_bus_read(self.stack_pointer.wrapping_add(1) as u16);
+        let low = nes.cpu_bus_read(self.stack_pointer.wrapping_add(2) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(3);
         self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
     // RTS
-    fn return_from_subroutine(&mut self, bus: &B) {
-        let high = bus.read(self.stack_pointer as u16);
-        let low = bus.read(self.stack_pointer.wrapping_add(1) as u16);
+    fn return_from_subroutine(&mut self, nes: &Nes) {
+        let high = nes.cpu_bus_read(self.stack_pointer as u16);
+        let low = nes.cpu_bus_read(self.stack_pointer.wrapping_add(1) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(2);
         self.program_counter = (((high as u16) << 8) | (low as u16)).wrapping_add(1);
     }
 
     // SBC
-    fn subtract_with_carry(&mut self, bus: &B) {
-        let operand_byte = self.get_operand_byte(bus);
+    fn subtract_with_carry(&mut self, nes: &Nes) {
+        let operand_byte = self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
         let difference = (self.accumulator as u16).wrapping_sub(operand_byte as u16).wrapping_sub(self.status_register.get_carry() as u16);
@@ -610,70 +607,70 @@ impl<B: Bus> Cpu<B> {
     }
 
     // SEC
-    fn set_carry(&mut self, bus: &B) {
+    fn set_carry(&mut self, nes: &Nes) {
         self.status_register.set_carry(true);
     }
 
     // SED
-    fn set_decimal(&mut self, bus: &B) {
+    fn set_decimal(&mut self, nes: &Nes) {
         self.status_register.set_decimal(true);
     }
 
     // SEI
-    fn set_interrupt_disable(&mut self, bus: &B) {
+    fn set_interrupt_disable(&mut self, nes: &Nes) {
         self.status_register.set_interrupt(true);
     }
 
     // STA
-    fn store_accumulator(&mut self, bus: &B) {
-        self.set_operand_byte(bus, self.accumulator);
+    fn store_accumulator(&mut self, nes: &Nes) {
+        self.set_operand_byte(nes, self.accumulator);
     }
 
     // STX
-    fn store_x(&mut self, bus: &B) {
-        self.set_operand_byte(bus, self.x_index);
+    fn store_x(&mut self, nes: &Nes) {
+        self.set_operand_byte(nes, self.x_index);
     }
 
     // STY
-    fn store_y(&mut self, bus: &B) {
-        self.set_operand_byte(bus, self.y_index);
+    fn store_y(&mut self, nes: &Nes) {
+        self.set_operand_byte(nes, self.y_index);
     }
 
     // TAX
-    fn transfer_accumulator_to_x(&mut self, bus: &B) {
+    fn transfer_accumulator_to_x(&mut self, nes: &Nes) {
         self.x_index = self.accumulator;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TAY
-    fn transfer_accumulator_to_y(&mut self, bus: &B) {
+    fn transfer_accumulator_to_y(&mut self, nes: &Nes) {
         self.y_index = self.accumulator;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TSX
-    fn transfer_stack_pointer_to_x(&mut self, bus: &B) {
+    fn transfer_stack_pointer_to_x(&mut self, nes: &Nes) {
         self.x_index = self.stack_pointer;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TXA
-    fn transfer_x_to_accumulator(&mut self, bus: &B) {
+    fn transfer_x_to_accumulator(&mut self, nes: &Nes) {
         self.accumulator = self.x_index;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TXS
-    fn transfer_x_to_stack_pointer(&mut self, bus: &B) {
+    fn transfer_x_to_stack_pointer(&mut self, nes: &Nes) {
         self.stack_pointer = self.x_index;
     }
 
     // TYA
-    fn transfer_y_to_accumulator(&mut self, bus: &B) {
+    fn transfer_y_to_accumulator(&mut self, nes: &Nes) {
         self.accumulator = self.y_index;
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
@@ -681,197 +678,197 @@ impl<B: Bus> Cpu<B> {
 
     // operation codes handlers
 
-    fn run_00(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.break_or_interrupt(bus);
+    fn run_00(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.break_or_interrupt(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_10(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_plus(bus);
+    fn run_10(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_plus(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_20(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.jump_subroutine(bus);
+    fn run_20(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.jump_subroutine(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_30(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_minus(bus);
+    fn run_30(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_minus(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_40(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.return_from_interrupt(bus);
+    fn run_40(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.return_from_interrupt(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_50(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_overflow_clear(bus);
+    fn run_50(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_overflow_clear(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_60(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.return_from_subroutine(bus);
+    fn run_60(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.return_from_subroutine(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_70(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_overflow_set(bus);
+    fn run_70(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_overflow_set(nes);
         self.sleep_cycles += 2;
     }
 
     // 80 - illegal
 
-    fn run_90(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_carry_clear(bus);
+    fn run_90(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_carry_clear(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_A0(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.load_y(bus);
+    fn run_A0(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.load_y(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_B0(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_carry_set(bus);
+    fn run_B0(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_carry_set(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_C0(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.compare_with_y(bus);
+    fn run_C0(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.compare_with_y(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_D0(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_not_equal(bus);
+    fn run_D0(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_not_equal(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_E0(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.compare_with_x(bus);
+    fn run_E0(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.compare_with_x(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_F0(&mut self, bus: &B) {
-        self.address_mode_relative(bus);
-        self.branch_on_equal(bus);
+    fn run_F0(&mut self, nes: &Nes) {
+        self.address_mode_relative(nes);
+        self.branch_on_equal(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_01(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.or_with_accumulator(bus);
+    fn run_01(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_11(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.or_with_accumulator(bus);
+    fn run_11(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_21(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.and(bus);
+    fn run_21(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.and(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_31(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.and(bus);
+    fn run_31(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.and(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_41(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.exclusive_or(bus);
+    fn run_41(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_51(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.exclusive_or(bus);
+    fn run_51(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_61(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.add_with_carry(bus);
+    fn run_61(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.add_with_carry(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_71(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.add_with_carry(bus);
+    fn run_71(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.add_with_carry(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_81(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.store_accumulator(bus);
+    fn run_81(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_91(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.store_accumulator(bus);
+    fn run_91(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_A1(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.load_accumulator(bus);
+    fn run_A1(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_B1(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.load_accumulator(bus);
+    fn run_B1(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_C1(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.compare(bus);
+    fn run_C1(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.compare(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_D1(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.compare(bus);
+    fn run_D1(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.compare(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_E1(&mut self, bus: &B) {
-        self.address_mode_x_indexed_indirect(bus);
-        self.subtract_with_carry(bus);
+    fn run_E1(&mut self, nes: &Nes) {
+        self.address_mode_x_indexed_indirect(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_F1(&mut self, bus: &B) {
-        self.address_mode_indirect_y_indexed(bus);
-        self.subtract_with_carry(bus);
+    fn run_F1(&mut self, nes: &Nes) {
+        self.address_mode_indirect_y_indexed(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 5;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
@@ -887,9 +884,9 @@ impl<B: Bus> Cpu<B> {
     // 82 - illegal
     // 92 - illegal
 
-    fn run_A2(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.load_x(bus);
+    fn run_A2(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.load_x(nes);
         self.sleep_cycles += 2;
     }
 
@@ -917,9 +914,9 @@ impl<B: Bus> Cpu<B> {
     // 04 - illegal
     // 14 - illegal
 
-    fn run_24(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.bit_test(bus);
+    fn run_24(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.bit_test(nes);
         self.sleep_cycles += 3;
     }
 
@@ -929,235 +926,235 @@ impl<B: Bus> Cpu<B> {
     // 64 - illegal
     // 74 - illegal
 
-    fn run_84(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.store_y(bus);
+    fn run_84(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.store_y(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_94(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.store_y(bus);
+    fn run_94(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.store_y(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_A4(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.load_y(bus);
+    fn run_A4(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.load_y(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_B4(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.load_y(bus);
+    fn run_B4(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.load_y(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_C4(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.compare_with_y(bus);
+    fn run_C4(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.compare_with_y(nes);
         self.sleep_cycles += 3;
     }
 
     // D4 - illegal
 
-    fn run_E4(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.compare_with_y(bus);
+    fn run_E4(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.compare_with_y(nes);
         self.sleep_cycles += 3;
     }
 
     // F4 - illegal
 
-    fn run_05(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.or_with_accumulator(bus);
+    fn run_05(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_15(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.or_with_accumulator(bus);
+    fn run_15(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_25(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.and(bus);
+    fn run_25(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.and(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_35(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.and(bus);
+    fn run_35(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.and(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_45(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.exclusive_or(bus);
+    fn run_45(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_55(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.exclusive_or(bus);
+    fn run_55(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_65(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.add_with_carry(bus);
+    fn run_65(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.add_with_carry(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_75(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.add_with_carry(bus);
+    fn run_75(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.add_with_carry(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_85(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.store_accumulator(bus);
+    fn run_85(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_95(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.store_accumulator(bus);
+    fn run_95(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_A5(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.load_accumulator(bus);
+    fn run_A5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_B5(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.load_accumulator(bus);
+    fn run_B5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_C5(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.compare(bus);
+    fn run_C5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.compare(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_D5(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.compare(bus);
+    fn run_D5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.compare(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_E5(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.subtract_with_carry(bus);
+    fn run_E5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_F5(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.subtract_with_carry(bus);
+    fn run_F5(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_06(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.arithmetic_shift_left(bus);
+    fn run_06(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.arithmetic_shift_left(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_16(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.arithmetic_shift_left(bus);
+    fn run_16(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.arithmetic_shift_left(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_26(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.rotate_left(bus);
+    fn run_26(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.rotate_left(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_36(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.rotate_left(bus);
+    fn run_36(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.rotate_left(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_46(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.logical_shift_right(bus);
+    fn run_46(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.logical_shift_right(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_56(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.logical_shift_right(bus);
+    fn run_56(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.logical_shift_right(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_66(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.rotate_right(bus);
+    fn run_66(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.rotate_right(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_76(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.rotate_right(bus);
+    fn run_76(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.rotate_right(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_86(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.store_x(bus);
+    fn run_86(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.store_x(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_96(&mut self, bus: &B) {
-        self.address_mode_zeropage_y_indexed(bus);
-        self.store_x(bus);
+    fn run_96(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_y_indexed(nes);
+        self.store_x(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_A6(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.load_x(bus);
+    fn run_A6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.load_x(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_B6(&mut self, bus: &B) {
-        self.address_mode_zeropage_y_indexed(bus);
-        self.load_x(bus);
+    fn run_B6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_y_indexed(nes);
+        self.load_x(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_C6(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.decrement(bus);
+    fn run_C6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.decrement(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_D6(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.decrement(bus);
+    fn run_D6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.decrement(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_E6(&mut self, bus: &B) {
-        self.address_mode_zeropage(bus);
-        self.increment(bus);
+    fn run_E6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage(nes);
+        self.increment(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_F6(&mut self, bus: &B) {
-        self.address_mode_zeropage_x_indexed(bus);
-        self.increment(bus);
+    fn run_F6(&mut self, nes: &Nes) {
+        self.address_mode_zeropage_x_indexed(nes);
+        self.increment(nes);
         self.sleep_cycles += 6;
     }
 
@@ -1178,268 +1175,268 @@ impl<B: Bus> Cpu<B> {
     // E7 - illegal
     // F7 - illegal
 
-    fn run_08(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.push_processor_status(bus);
+    fn run_08(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.push_processor_status(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_18(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.clear_carry(bus);
+    fn run_18(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.clear_carry(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_28(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.pull_processor_status(bus);
+    fn run_28(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.pull_processor_status(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_38(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.set_carry(bus);
+    fn run_38(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.set_carry(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_48(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.push_accumulator(bus);
+    fn run_48(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.push_accumulator(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_58(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.clear_interrupt_disable(bus);
+    fn run_58(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.clear_interrupt_disable(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_68(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.pull_accumulator(bus);
+    fn run_68(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.pull_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_78(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.set_interrupt_disable(bus);
+    fn run_78(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.set_interrupt_disable(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_88(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.decrement_y(bus);
+    fn run_88(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.decrement_y(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_98(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_y_to_accumulator(bus);
+    fn run_98(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_y_to_accumulator(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_A8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_accumulator_to_y(bus);
+    fn run_A8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_accumulator_to_y(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_B8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.clear_overflow(bus);
+    fn run_B8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.clear_overflow(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_C8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.increment_y(bus);
+    fn run_C8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.increment_y(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_D8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.clear_decimal(bus);
+    fn run_D8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.clear_decimal(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_E8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.increment_x(bus);
+    fn run_E8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.increment_x(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_F8(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.set_decimal(bus);
+    fn run_F8(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.set_decimal(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_09(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.or_with_accumulator(bus);
+    fn run_09(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_19(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.or_with_accumulator(bus);
-        self.sleep_cycles += 4;
-        self.sleep_cycles += self.crossed_page_boundary as u8;
-    }
-
-    fn run_29(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.and(bus);
-        self.sleep_cycles += 2;
-    }
-
-    fn run_39(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.and(bus);
+    fn run_19(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_49(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.exclusive_or(bus);
+    fn run_29(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.and(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_59(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.exclusive_or(bus);
+    fn run_39(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.and(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_69(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.add_with_carry(bus);
+    fn run_49(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_79(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.add_with_carry(bus);
+    fn run_59(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.exclusive_or(nes);
+        self.sleep_cycles += 4;
+        self.sleep_cycles += self.crossed_page_boundary as u8;
+    }
+
+    fn run_69(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.add_with_carry(nes);
+        self.sleep_cycles += 2;
+    }
+
+    fn run_79(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.add_with_carry(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     // 89 - illegal
 
-    fn run_99(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.store_accumulator(bus);
+    fn run_99(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_A9(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.load_accumulator(bus);
+    fn run_A9(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_B9(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.load_accumulator(bus);
+    fn run_B9(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_C9(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.compare(bus);
+    fn run_C9(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.compare(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_D9(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.compare(bus);
+    fn run_D9(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.compare(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_E9(&mut self, bus: &B) {
-        self.address_mode_immediate(bus);
-        self.subtract_with_carry(bus);
+    fn run_E9(&mut self, nes: &Nes) {
+        self.address_mode_immediate(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_F9(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.subtract_with_carry(bus);
+    fn run_F9(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.subtract_with_carry(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_0A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.arithmetic_shift_left(bus);
+    fn run_0A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.arithmetic_shift_left(nes);
         self.sleep_cycles += 2;
     }
 
     // 1A - illegal
 
-    fn run_2A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.rotate_left(bus);
+    fn run_2A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.rotate_left(nes);
         self.sleep_cycles += 2;
     }
 
     // 3A - illegal
 
-    fn run_4A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.logical_shift_right(bus);
+    fn run_4A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.logical_shift_right(nes);
         self.sleep_cycles += 2;
     }
 
     // 5A - illegal
 
-    fn run_6A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.rotate_right(bus);
+    fn run_6A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.rotate_right(nes);
         self.sleep_cycles += 2;
     }
 
     // 7A - illegal
 
-    fn run_8A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_x_to_accumulator(bus);
+    fn run_8A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_x_to_accumulator(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_9A(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_x_to_stack_pointer(bus);
+    fn run_9A(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_x_to_stack_pointer(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_AA(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_accumulator_to_x(bus);
+    fn run_AA(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_accumulator_to_x(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_BA(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.transfer_stack_pointer_to_x(bus);
+    fn run_BA(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.transfer_stack_pointer_to_x(nes);
         self.sleep_cycles += 2;
     }
 
-    fn run_CA(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.decrement_x(bus);
+    fn run_CA(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.decrement_x(nes);
         self.sleep_cycles += 2;
     }
 
     // DA - illegal
 
-    fn run_EA(&mut self, bus: &B) {
-        self.address_mode_implied(bus);
-        self.no_operation(bus);
+    fn run_EA(&mut self, nes: &Nes) {
+        self.address_mode_implied(nes);
+        self.no_operation(nes);
         self.sleep_cycles += 2;
     }
 
@@ -1463,260 +1460,260 @@ impl<B: Bus> Cpu<B> {
     // 0C - illegal
     // 1C - illegal
 
-    fn run_2C(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.bit_test(bus);
+    fn run_2C(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.bit_test(nes);
         self.sleep_cycles += 4;
     }
 
     // 3C - illegal
 
-    fn run_4C(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.jump(bus);
+    fn run_4C(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.jump(nes);
         self.sleep_cycles += 3;
     }
 
     // 5C - illegal
 
-    fn run_6C(&mut self, bus: &B) {
-        self.address_mode_indirect(bus);
-        self.jump(bus);
+    fn run_6C(&mut self, nes: &Nes) {
+        self.address_mode_indirect(nes);
+        self.jump(nes);
         self.sleep_cycles += 5;
     }
 
     // 7C - illegal
 
-    fn run_8C(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.store_y(bus);
+    fn run_8C(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.store_y(nes);
         self.sleep_cycles += 4;
     }
 
     // 9C - illegal
 
-    fn run_AC(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.load_y(bus);
+    fn run_AC(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.load_y(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_BC(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.load_y(bus);
+    fn run_BC(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.load_y(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_CC(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.compare_with_y(bus);
+    fn run_CC(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.compare_with_y(nes);
         self.sleep_cycles += 4;
     }
 
     // DC - illegal
 
-    fn run_EC(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.compare_with_x(bus);
+    fn run_EC(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.compare_with_x(nes);
         self.sleep_cycles += 4;
     }
 
     // FC - illegal
 
-    fn run_0D(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.or_with_accumulator(bus);
+    fn run_0D(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_1D(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.or_with_accumulator(bus);
-        self.sleep_cycles += 4;
-        self.sleep_cycles += self.crossed_page_boundary as u8;
-    }
-
-    fn run_2D(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.and(bus);
-        self.sleep_cycles += 4;
-    }
-
-    fn run_3D(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.and(bus);
+    fn run_1D(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.or_with_accumulator(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_4D(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.exclusive_or(bus);
+    fn run_2D(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.and(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_5D(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.exclusive_or(bus);
-        self.sleep_cycles += 4;
-        self.sleep_cycles += self.crossed_page_boundary as u8;
-    }
-
-    fn run_6D(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.add_with_carry(bus);
-        self.sleep_cycles += 4;
-    }
-
-    fn run_7D(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.add_with_carry(bus);
+    fn run_3D(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.and(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_8D(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.store_accumulator(bus);
+    fn run_4D(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.exclusive_or(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_9D(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.store_accumulator(bus);
+    fn run_5D(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.exclusive_or(nes);
+        self.sleep_cycles += 4;
+        self.sleep_cycles += self.crossed_page_boundary as u8;
+    }
+
+    fn run_6D(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.add_with_carry(nes);
+        self.sleep_cycles += 4;
+    }
+
+    fn run_7D(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.add_with_carry(nes);
+        self.sleep_cycles += 4;
+        self.sleep_cycles += self.crossed_page_boundary as u8;
+    }
+
+    fn run_8D(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.store_accumulator(nes);
+        self.sleep_cycles += 4;
+    }
+
+    fn run_9D(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.store_accumulator(nes);
         self.sleep_cycles += 5;
     }
 
-    fn run_AD(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.load_accumulator(bus);
+    fn run_AD(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_BD(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.load_accumulator(bus);
-        self.sleep_cycles += 4;
-        self.sleep_cycles += self.crossed_page_boundary as u8;
-    }
-
-    fn run_CD(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.compare(bus);
-        self.sleep_cycles += 4;
-    }
-
-    fn run_DD(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.compare(bus);
+    fn run_BD(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.load_accumulator(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_ED(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.subtract_with_carry(bus);
+    fn run_CD(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.compare(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_FD(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.subtract_with_carry(bus);
+    fn run_DD(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.compare(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_0E(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.arithmetic_shift_left(bus);
+    fn run_ED(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.subtract_with_carry(nes);
+        self.sleep_cycles += 4;
+    }
+
+    fn run_FD(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.subtract_with_carry(nes);
+        self.sleep_cycles += 4;
+        self.sleep_cycles += self.crossed_page_boundary as u8;
+    }
+
+    fn run_0E(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.arithmetic_shift_left(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_1E(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.arithmetic_shift_left(bus);
+    fn run_1E(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.arithmetic_shift_left(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_2E(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.rotate_left(bus);
+    fn run_2E(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.rotate_left(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_3E(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.rotate_left(bus);
+    fn run_3E(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.rotate_left(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_4E(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.logical_shift_right(bus);
+    fn run_4E(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.logical_shift_right(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_5E(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.logical_shift_right(bus);
+    fn run_5E(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.logical_shift_right(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_6E(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.rotate_right(bus);
+    fn run_6E(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.rotate_right(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_7E(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.rotate_right(bus);
+    fn run_7E(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.rotate_right(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_8E(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.store_x(bus);
+    fn run_8E(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.store_x(nes);
         self.sleep_cycles += 4;
     }
 
     // 9E - illegal
 
-    fn run_AE(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.load_x(bus);
+    fn run_AE(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.load_x(nes);
         self.sleep_cycles += 4;
     }
 
-    fn run_BE(&mut self, bus: &B) {
-        self.address_mode_absolute_y_indexed(bus);
-        self.load_x(bus);
+    fn run_BE(&mut self, nes: &Nes) {
+        self.address_mode_absolute_y_indexed(nes);
+        self.load_x(nes);
         self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
-    fn run_CE(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.decrement(bus);
+    fn run_CE(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.decrement(nes);
         self.sleep_cycles += 3;
     }
 
-    fn run_DE(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.decrement(bus);
+    fn run_DE(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.decrement(nes);
         self.sleep_cycles += 7;
     }
 
-    fn run_EE(&mut self, bus: &B) {
-        self.address_mode_absolute(bus);
-        self.increment(bus);
+    fn run_EE(&mut self, nes: &Nes) {
+        self.address_mode_absolute(nes);
+        self.increment(nes);
         self.sleep_cycles += 6;
     }
 
-    fn run_FE(&mut self, bus: &B) {
-        self.address_mode_absolute_x_indexed(bus);
-        self.increment(bus);
+    fn run_FE(&mut self, nes: &Nes) {
+        self.address_mode_absolute_x_indexed(nes);
+        self.increment(nes);
         self.sleep_cycles += 7;
     }
 
@@ -1737,14 +1734,14 @@ impl<B: Bus> Cpu<B> {
     // EF - illegal
     // FF - illegal
 
-    fn run_xx(&mut self, bus: &B) {
+    fn run_xx(&mut self, nes: &Nes) {
         eprintln!("Illegal opcode found ({:#02}). Running noop.", self.opcode);
         self.program_counter = self.program_counter.wrapping_add(1);
         self.sleep_cycles = 2;
     }
 }
 
-impl<B> std::fmt::Debug for Cpu<B> {
+impl std::fmt::Debug for Cpu {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1784,10 +1781,10 @@ pub struct StatusRegister(u8);
 
 macro_rules! flag_methods {
     ($get_flag_name:ident,$set_flag_name:ident,$bit:expr) => {
-        fn $get_flag_name(&self) -> bool {
+        pub fn $get_flag_name(&self) -> bool {
             (self.0 & (1 << $bit)) > 0
         }
-        fn $set_flag_name(&mut self, new: bool) {
+        pub fn $set_flag_name(&mut self, new: bool) {
             self.0 = (self.0 & !(1 << $bit)) | ((new as u8) << $bit);
         }
     };

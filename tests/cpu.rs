@@ -1,35 +1,6 @@
-use nes_lib::bus::Bus;
+use nes_lib::cpu_bus::CpuBus;
 use nes_lib::cpu::Cpu;
 use std::cell::RefCell;
-
-struct CpuTestBus {
-    data: RefCell<[u8; 65536]>,
-    debug_range: (u16, u16),
-}
-
-impl CpuTestBus {
-    fn with_program(program: &[u8], debug_range: (u16, u16)) -> Self {
-        let bus = Self {
-            data: RefCell::new([0; 65536]),
-            debug_range,
-        };
-        let mut data = bus.data.borrow_mut();
-        for (i, byte) in program.iter().enumerate().take(data.len()) {
-            data[i] = *byte;
-        }
-        drop(data);
-        bus
-    }
-}
-
-impl Bus for CpuTestBus {
-    fn read(&self, address: u16) -> u8 {
-        self.data.borrow()[address as usize]
-    }
-    fn write(&self, address: u16, value: u8) {
-        self.data.borrow_mut()[address as usize] = value;
-    }
-}
 
 impl std::fmt::Debug for CpuTestBus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

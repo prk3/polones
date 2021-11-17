@@ -88,10 +88,8 @@ impl Cpu {
         Self::INSTRUCTION_SET[self.opcode as usize](self, nes);
     }
 
-    pub fn run_one_instruction(&mut self, nes: &Nes) {
-        self.sleep_cycles = 0;
-        self.tick(nes);
-        self.sleep_cycles = 0;
+    pub fn finished_instruction(&self) -> bool {
+        self.sleep_cycles == 0
     }
 
     fn get_operand_byte(&self, nes: &Nes) -> u8 {
@@ -132,7 +130,7 @@ impl Cpu {
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_address = ((high as u16) << 8) | (low as u16);
-
+        println!("{:04x}", self.operand_address);
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
@@ -265,7 +263,7 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
-        self.accumulator = old_accumulator.wrapping_add(operand_byte).wrapping_add(self.status_register.get_carry() as u8);
+        self.accumulator = old_accumulator & operand_byte;
 
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);

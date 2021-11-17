@@ -126,8 +126,16 @@ impl Nes {
 
     }
     pub fn run_one_cpu_instruction(&mut self) {
-        self.cpu.borrow_mut().run_one_instruction(&self);
-        self.debug_display.borrow_mut().display(self);
+        loop {
+            self.cpu.borrow_mut().tick(&self);
+            self.ppu.borrow_mut().tick(&self);
+            self.ppu.borrow_mut().tick(&self);
+            self.ppu.borrow_mut().tick(&self);
+            if self.cpu.borrow().finished_instruction() {
+                self.debug_display.borrow_mut().display(self);
+                break;
+            }
+        }
     }
     pub fn run_one_clock_tick() {}
     pub fn run_one_frame(&mut self) {}

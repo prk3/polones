@@ -135,6 +135,9 @@ impl StatusRegister {
 }
 
 pub struct Ppu {
+    scanline: u16,
+    pixel: u16,
+
     control_register: ControlRegister,
     mask_register: MaskRegister,
     status_register: StatusRegister,
@@ -152,6 +155,9 @@ pub struct Ppu {
 impl Ppu {
     pub fn new() -> Self {
         Self {
+            scanline: 0,
+            pixel: 0,
+
             control_register: ControlRegister::new(),
             mask_register: MaskRegister::new(),
             status_register: StatusRegister::new(),
@@ -166,6 +172,17 @@ impl Ppu {
             buffer: Box::new([[(0, 0, 0); 256]; 240]),
         }
     }
+    pub fn tick(&mut self, nes: &Nes) {
+        if self.scanline == 241 && self.pixel == 1 {
+            self.vblank = true;
+        }
+        if self.scanline == 261 && self.pixel == 1 {
+            self.vblank = false;
+            // TODO clear sprite 0
+            // TODO clear overflow
+        }
+    }
+
     pub fn cpu_read(&mut self, nes: &Nes, address: u16) -> u8 {
         match address {
             0x2002 => {
@@ -177,7 +194,7 @@ impl Ppu {
                 self.vblank = false;
                 self.scroll_latch = false;
                 self.ppu_address_latch = false;
-                result
+                dbg!(result)
             }
             0x2007 => {
                 let result = nes.ppu_bus_read(self.ppu_address);

@@ -8,7 +8,6 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
-use std::borrow::Borrow;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -22,6 +21,137 @@ const YELLOW: (u8, u8, u8) = (255, 255, 0);
 const CYAN: (u8, u8, u8) = (0, 255, 255);
 const MAGENTA: (u8, u8, u8) = (255, 0, 255);
 const WHITE: (u8, u8, u8) = (255, 255, 255);
+
+struct TextBuffer<const W: usize, const H: usize> {
+    buffer: [[(u8, u8, u8, u8); W]; H],
+}
+
+impl<const W: usize, const H: usize> TextBuffer<W, H> {
+    fn new() -> Self {
+        Self {
+            buffer: [[(0, 0, 0, 0); W]; H],
+        }
+    }
+
+    fn clear(&mut self) {
+        for y in 0..H {
+            for x in 0..W {
+                self.buffer[y][x] = (0, 0, 0, 0);
+            }
+        }
+    }
+
+    fn as_texture_data(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(&self.buffer[0][0].0, W * H * 4) }
+    }
+
+    fn write_char_with_color(&mut self, value: char, line: u8, col: u8, color: (u8, u8, u8)) {
+        if (line as usize) < H / 8 && (col as usize) < W / 8 {
+            let (char_row, char_col) = match value {
+                _c @ 'A'..='O' => (0, 1 + (value as u8 - 'A' as u8)),
+                _c @ 'a'..='o' => (0, 1 + (value as u8 - 'a' as u8)),
+                _c @ 'P'..='Z' => (1, value as u8 - 'P' as u8),
+                _c @ 'p'..='z' => (1, value as u8 - 'p' as u8),
+                _c @ '0'..='9' => (3, value as u8 - '0' as u8),
+                '@' => (0, 0),
+                '[' => (1, 11),
+                '£' => (1, 12),
+                ']' => (1, 13),
+                '↑' => (1, 14),
+                '←' => (1, 15),
+                ' ' => (2, 0),
+                '!' => (2, 1),
+                '"' => (2, 2),
+                '#' => (2, 3),
+                '$' => (2, 4),
+                '%' => (2, 5),
+                '&' => (2, 6),
+                '\'' => (2, 7),
+                '(' => (2, 8),
+                ')' => (2, 9),
+                '*' => (2, 10),
+                '+' => (2, 11),
+                ',' => (2, 12),
+                '-' => (2, 13),
+                '.' => (2, 14),
+                '/' => (2, 15),
+                ':' => (3, 10),
+                ';' => (3, 11),
+                '<' => (3, 12),
+                '=' => (3, 13),
+                '>' => (3, 14),
+                '?' => (3, 15),
+                _ => (3, 15),
+            };
+
+            for y in 0..8 {
+                let mut row = FONT[((char_row as usize * 8) + y) * 16 + char_col as usize];
+                for x in 0..8 {
+                    let (r, g, b) = if row & 0b10000000 > 0 {
+                        color
+                    } else {
+                        (0, 0, 0)
+                    };
+                    let line = line as usize;
+                    let col = col as usize;
+                    self.buffer[line * 8 + y][col * 8 + x] = (b, g, r, 0);
+                    row = row << 1;
+                }
+            }
+        }
+    }
+
+    fn write_str_with_color(&mut self, value: &str, line: u8, col: u8, color: (u8, u8, u8)) {
+        let mut col = col;
+        for c in value.chars() {
+            self.write_char_with_color(c, line, col, color);
+            col = col.saturating_add(1);
+        }
+    }
+
+    fn write_u8_with_color(&mut self, value: u8, line: u8, col: u8, color: (u8, u8, u8)) {
+        let hex2 = value >> 4 & 0b1111;
+        let hex1 = value >> 0 & 0b1111;
+        let num_to_char = |c| {
+            char::from_u32(if c < 10 {
+                '0' as u32 + c as u32
+            } else {
+                'A' as u32 + c as u32 - 10
+            })
+            .unwrap()
+        };
+        self.write_char_with_color(num_to_char(hex2), line, col, color);
+        self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(1), color);
+    }
+
+    fn write_u16_with_color(&mut self, value: u16, line: u8, col: u8, color: (u8, u8, u8)) {
+        let hex4 = value >> 12 & 0b1111;
+        let hex3 = value >> 8 & 0b1111;
+        let hex2 = value >> 4 & 0b1111;
+        let hex1 = value >> 0 & 0b1111;
+        let num_to_char = |c| {
+            char::from_u32(if c < 10 {
+                '0' as u32 + c as u32
+            } else {
+                'A' as u32 + c as u32 - 10
+            })
+            .unwrap()
+        };
+        self.write_char_with_color(num_to_char(hex4), line, col, color);
+        self.write_char_with_color(num_to_char(hex3), line, col.saturating_add(1), color);
+        self.write_char_with_color(num_to_char(hex2), line, col.saturating_add(2), color);
+        self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(3), color);
+    }
+
+    fn write_bool_with_color(&mut self, value: bool, line: u8, col: u8, color: (u8, u8, u8)) {
+        self.write_char_with_color(
+            char::from_u32('0' as u32 + value as u32).unwrap(),
+            line,
+            col,
+            color,
+        );
+    }
+}
 
 struct SdlDisplay {
     canvas: sdl2::render::WindowCanvas,
@@ -265,7 +395,7 @@ struct SdlDebugDisplay {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
-    draw_buffer: [u8; Self::WIDTH as usize * Self::HEIGHT as usize * 4],
+    text_buffer: TextBuffer<{ Self::WIDTH as usize }, { Self::HEIGHT as usize }>,
     disassembly: [InstructionTableValue; 1 << 16],
 }
 
@@ -319,120 +449,9 @@ impl SdlDebugDisplay {
             canvas,
             texture: unsafe { std::mem::transmute(texture) },
             _texture_creator: texture_creator,
-            draw_buffer: [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4],
+            text_buffer: TextBuffer::new(),
             disassembly: [InstructionTableValue::Unknown; 1 << 16],
         }
-    }
-
-    fn write_char_with_color(&mut self, value: char, line: u8, col: u8, color: (u8, u8, u8)) {
-        if (line as u32) < Self::HEIGHT / 8 && (col as u32) < Self::WIDTH / 8 {
-            let (char_row, char_col) = match value {
-                _c @ 'A'..='O' => (0, 1 + (value as u8 - 'A' as u8)),
-                _c @ 'a'..='o' => (0, 1 + (value as u8 - 'a' as u8)),
-                _c @ 'P'..='Z' => (1, value as u8 - 'P' as u8),
-                _c @ 'p'..='z' => (1, value as u8 - 'p' as u8),
-                _c @ '0'..='9' => (3, value as u8 - '0' as u8),
-                '@' => (0, 0),
-                '[' => (1, 11),
-                '£' => (1, 12),
-                ']' => (1, 13),
-                '↑' => (1, 14),
-                '←' => (1, 15),
-                ' ' => (2, 0),
-                '!' => (2, 1),
-                '"' => (2, 2),
-                '#' => (2, 3),
-                '$' => (2, 4),
-                '%' => (2, 5),
-                '&' => (2, 6),
-                '\'' => (2, 7),
-                '(' => (2, 8),
-                ')' => (2, 9),
-                '*' => (2, 10),
-                '+' => (2, 11),
-                ',' => (2, 12),
-                '-' => (2, 13),
-                '.' => (2, 14),
-                '/' => (2, 15),
-                ':' => (3, 10),
-                ';' => (3, 11),
-                '<' => (3, 12),
-                '=' => (3, 13),
-                '>' => (3, 14),
-                '?' => (3, 15),
-                _ => (3, 15),
-            };
-
-            for y in 0..8 {
-                let mut row = FONT[((char_row as usize * 8) + y) * 16 + char_col as usize];
-                for x in 0..8 {
-                    let (r, g, b) = if row & 0b10000000 > 0 {
-                        color
-                    } else {
-                        (0, 0, 0)
-                    };
-                    let line = line as usize;
-                    let col = col as usize;
-                    let pixel_start =
-                        4 * ((line * 8 + y) * Self::WIDTH as usize + (col * 8) + x) + 0;
-                    self.draw_buffer[pixel_start + 0] = b;
-                    self.draw_buffer[pixel_start + 1] = g;
-                    self.draw_buffer[pixel_start + 2] = r;
-                    row = row << 1;
-                }
-            }
-        }
-    }
-
-    fn write_str_with_color(&mut self, value: &str, line: u8, col: u8, color: (u8, u8, u8)) {
-        let mut col = col;
-        for c in value.chars() {
-            self.write_char_with_color(c, line, col, color);
-            col = col.saturating_add(1);
-        }
-    }
-
-    fn write_u8_with_color(&mut self, value: u8, line: u8, col: u8, color: (u8, u8, u8)) {
-        let hex2 = value >> 4 & 0b1111;
-        let hex1 = value >> 0 & 0b1111;
-        let num_to_char = |c| {
-            char::from_u32(if c < 10 {
-                '0' as u32 + c as u32
-            } else {
-                'A' as u32 + c as u32 - 10
-            })
-            .unwrap()
-        };
-        self.write_char_with_color(num_to_char(hex2), line, col, color);
-        self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(1), color);
-    }
-
-    fn write_u16_with_color(&mut self, value: u16, line: u8, col: u8, color: (u8, u8, u8)) {
-        let hex4 = value >> 12 & 0b1111;
-        let hex3 = value >> 8 & 0b1111;
-        let hex2 = value >> 4 & 0b1111;
-        let hex1 = value >> 0 & 0b1111;
-        let num_to_char = |c| {
-            char::from_u32(if c < 10 {
-                '0' as u32 + c as u32
-            } else {
-                'A' as u32 + c as u32 - 10
-            })
-            .unwrap()
-        };
-        self.write_char_with_color(num_to_char(hex4), line, col, color);
-        self.write_char_with_color(num_to_char(hex3), line, col.saturating_add(1), color);
-        self.write_char_with_color(num_to_char(hex2), line, col.saturating_add(2), color);
-        self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(3), color);
-    }
-
-    fn write_bool_with_color(&mut self, value: bool, line: u8, col: u8, color: (u8, u8, u8)) {
-        self.write_char_with_color(
-            char::from_u32('0' as u32 + value as u32).unwrap(),
-            line,
-            col,
-            color,
-        );
     }
 
     fn write_instruction_from_disassembly(
@@ -443,88 +462,89 @@ impl SdlDebugDisplay {
         color: (u8, u8, u8),
     ) {
         let (operation, mode) = self.disassembly[address as usize].unwrap_opcode();
+        let tb = &mut self.text_buffer;
 
         let operation_str = format!("{:?}", operation);
-        self.write_u16_with_color(address, line, col, color);
-        self.write_str_with_color(&operation_str, line, col + 5, operation.color());
+        tb.write_u16_with_color(address, line, col, color);
+        tb.write_str_with_color(&operation_str, line, col + 5, operation.color());
 
         // todo handle the case when next byte overflows address
         match mode {
             AddressingMode::Accumulator => {
-                self.write_char_with_color('A', line, col + 9, RED);
+                tb.write_char_with_color('A', line, col + 9, RED);
             }
             AddressingMode::Absolute => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u16_with_color((low as u16) << 8 | high as u16, line, col + 10, WHITE);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 10, WHITE);
             }
             AddressingMode::AbsoluteXIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u16_with_color((low as u16) << 8 | high as u16, line, col + 10, WHITE);
-                self.write_str_with_color(",X", line, col + 14, RED);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 10, WHITE);
+                tb.write_str_with_color(",X", line, col + 14, RED);
             }
             AddressingMode::AbsoluteYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u16_with_color((low as u16) << 8 | high as u16, line, col + 10, WHITE);
-                self.write_str_with_color(",Y", line, col + 14, RED);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 10, WHITE);
+                tb.write_str_with_color(",Y", line, col + 14, RED);
             }
             AddressingMode::Immediate => {
                 let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('#', line, col + 9, RED);
-                self.write_char_with_color('$', line, col + 10, YELLOW);
-                self.write_u8_with_color(byte, line, col + 11, WHITE);
+                tb.write_char_with_color('#', line, col + 9, RED);
+                tb.write_char_with_color('$', line, col + 10, YELLOW);
+                tb.write_u8_with_color(byte, line, col + 11, WHITE);
             }
             AddressingMode::Implied => {}
             AddressingMode::Indirect => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                self.write_char_with_color('(', line, col + 9, RED);
-                self.write_char_with_color('$', line, col + 10, YELLOW);
-                self.write_u16_with_color((low as u16) << 8 | high as u16, line, col + 11, WHITE);
-                self.write_char_with_color(')', line, col + 15, RED);
+                tb.write_char_with_color('(', line, col + 9, RED);
+                tb.write_char_with_color('$', line, col + 10, YELLOW);
+                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 11, WHITE);
+                tb.write_char_with_color(')', line, col + 15, RED);
             }
             AddressingMode::XIndexedIndirect => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('(', line, col + 9, RED);
-                self.write_char_with_color('$', line, col + 10, YELLOW);
-                self.write_u8_with_color(low, line, col + 11, WHITE);
-                self.write_str_with_color(",X)", line, col + 13, RED);
+                tb.write_char_with_color('(', line, col + 9, RED);
+                tb.write_char_with_color('$', line, col + 10, YELLOW);
+                tb.write_u8_with_color(low, line, col + 11, WHITE);
+                tb.write_str_with_color(",X)", line, col + 13, RED);
             }
             AddressingMode::IndirectYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('(', line, col + 9, RED);
-                self.write_char_with_color('$', line, col + 10, YELLOW);
-                self.write_u8_with_color(low, line, col + 11, WHITE);
-                self.write_str_with_color("),Y", line, col + 13, RED);
+                tb.write_char_with_color('(', line, col + 9, RED);
+                tb.write_char_with_color('$', line, col + 10, YELLOW);
+                tb.write_u8_with_color(low, line, col + 11, WHITE);
+                tb.write_str_with_color("),Y", line, col + 13, RED);
             }
             AddressingMode::Relative => {
                 // TODO has the same syntax as zeropage, maybe indicate which one is it?
                 let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u8_with_color(byte, line, col + 10, WHITE);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u8_with_color(byte, line, col + 10, WHITE);
             }
             AddressingMode::Zeropage => {
                 // TODO has the same syntax as relative, maybe indicate which one is it?
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u8_with_color(low, line, col + 10, WHITE);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u8_with_color(low, line, col + 10, WHITE);
             }
             AddressingMode::ZeropageXIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u8_with_color(low, line, col + 10, WHITE);
-                self.write_str_with_color(",X", line, col + 12, RED);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u8_with_color(low, line, col + 10, WHITE);
+                tb.write_str_with_color(",X", line, col + 12, RED);
             }
             AddressingMode::ZeropageYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                self.write_char_with_color('$', line, col + 9, YELLOW);
-                self.write_u8_with_color(low, line, col + 10, WHITE);
-                self.write_str_with_color(",Y", line, col + 12, RED);
+                tb.write_char_with_color('$', line, col + 9, YELLOW);
+                tb.write_u8_with_color(low, line, col + 10, WHITE);
+                tb.write_str_with_color(",Y", line, col + 12, RED);
             }
         }
     }
@@ -533,7 +553,8 @@ impl SdlDebugDisplay {
         let mut position = cpu.program_counter;
         let mut checked_count = 0;
 
-        while let InstructionTableValue::Unknown = self.disassembly[position as usize] {
+        loop {
+            // while let InstructionTableValue::Unknown = self.disassembly[position as usize] {
             if checked_count == 16 {
                 break;
             }
@@ -575,51 +596,52 @@ impl DebugDisplay for SdlDebugDisplay {
         let cpu_ref = nes.cpu.borrow();
         let cpu = &*cpu_ref;
 
-        self.canvas.clear();
-        self.draw_buffer.iter_mut().for_each(|byte| *byte = 0);
-
         self.fill_instructions(cpu, nes);
 
-        self.write_str_with_color("A", 0, 1, YELLOW);
-        self.write_u8_with_color(cpu.accumulator, 0, 3, WHITE);
+        self.canvas.clear();
+        self.text_buffer.clear();
+        let tb = &mut self.text_buffer;
 
-        self.write_str_with_color("X", 1, 1, YELLOW);
-        self.write_u8_with_color(cpu.x_index, 1, 3, WHITE);
+        tb.write_str_with_color("A", 0, 1, YELLOW);
+        tb.write_u8_with_color(cpu.accumulator, 0, 3, WHITE);
 
-        self.write_str_with_color("Y", 2, 1, YELLOW);
-        self.write_u8_with_color(cpu.y_index, 2, 3, WHITE);
+        tb.write_str_with_color("X", 1, 1, YELLOW);
+        tb.write_u8_with_color(cpu.x_index, 1, 3, WHITE);
 
-        self.write_str_with_color("SP", 3, 0, YELLOW);
-        self.write_u8_with_color(cpu.stack_pointer, 3, 3, WHITE);
+        tb.write_str_with_color("Y", 2, 1, YELLOW);
+        tb.write_u8_with_color(cpu.y_index, 2, 3, WHITE);
 
-        self.write_str_with_color("PC", 4, 0, YELLOW);
-        self.write_u16_with_color(cpu.program_counter, 4, 3, WHITE);
+        tb.write_str_with_color("SP", 3, 0, YELLOW);
+        tb.write_u8_with_color(cpu.stack_pointer, 3, 3, WHITE);
 
-        self.write_str_with_color("SR", 5, 0, YELLOW);
+        tb.write_str_with_color("PC", 4, 0, YELLOW);
+        tb.write_u16_with_color(cpu.program_counter, 4, 3, WHITE);
 
-        self.write_str_with_color("N", 6, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_negative(), 6, 3, WHITE);
+        tb.write_str_with_color("SR", 5, 0, YELLOW);
 
-        self.write_str_with_color("V", 7, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_overflow(), 7, 3, WHITE);
+        tb.write_str_with_color("N", 6, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_negative(), 6, 3, WHITE);
 
-        self.write_str_with_color("-", 8, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_ignored(), 8, 3, WHITE);
+        tb.write_str_with_color("V", 7, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_overflow(), 7, 3, WHITE);
 
-        self.write_str_with_color("B", 9, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_break(), 9, 3, WHITE);
+        tb.write_str_with_color("-", 8, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_ignored(), 8, 3, WHITE);
 
-        self.write_str_with_color("D", 10, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_decimal(), 10, 3, WHITE);
+        tb.write_str_with_color("B", 9, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_break(), 9, 3, WHITE);
 
-        self.write_str_with_color("I", 11, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_interrupt(), 11, 3, WHITE);
+        tb.write_str_with_color("D", 10, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_decimal(), 10, 3, WHITE);
 
-        self.write_str_with_color("Z", 12, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_zero(), 12, 3, WHITE);
+        tb.write_str_with_color("I", 11, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_interrupt(), 11, 3, WHITE);
 
-        self.write_str_with_color("C", 13, 1, YELLOW);
-        self.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, WHITE);
+        tb.write_str_with_color("Z", 12, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_zero(), 12, 3, WHITE);
+
+        tb.write_str_with_color("C", 13, 1, YELLOW);
+        tb.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, WHITE);
 
         let mut address = cpu.program_counter;
         let mut color = RED;
@@ -667,7 +689,7 @@ impl DebugDisplay for SdlDebugDisplay {
         self.texture
             .update(
                 Rect::new(0, 0, Self::WIDTH, Self::HEIGHT),
-                &self.draw_buffer,
+                &self.text_buffer.as_texture_data(),
                 Self::WIDTH as usize * 4,
             )
             .unwrap();
@@ -688,7 +710,6 @@ impl DebugDisplay for SdlDebugDisplay {
     }
 }
 
-
 struct SdlPpuDebugDisplay {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
@@ -702,9 +723,7 @@ impl SdlPpuDebugDisplay {
     const HEIGHT: u32 = 240;
 }
 
-struct SdlInput {
-
-}
+struct SdlInput {}
 
 impl SdlInput {
     pub fn new() -> Self {
@@ -720,64 +739,99 @@ impl Input for SdlInput {
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
-    let file_contents = std::fs::read(args.get(1).expect("file argument missing")).expect("could not read the file");
+    let file_contents = std::fs::read(args.get(1).expect("file argument missing"))
+        .expect("could not read the file");
     let game_file = GameFile::read(file_contents).expect("file does not contain a nes game");
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem
+    let display_window = video_subsystem
         .window("nes display", SdlDisplay::WIDTH * 3, SdlDisplay::HEIGHT * 3)
         .position_centered()
         .build()
         .unwrap();
+    let display_window_id = display_window.id();
 
-    let canvas = window.into_canvas().build().unwrap();
+    let display_canvas = display_window.into_canvas().build().unwrap();
 
-    let window2 = video_subsystem
+    let debug_window = video_subsystem
         .window(
-            "cpu inspector",
+            "nes cpu inspector",
             SdlDisplay::WIDTH * 3,
             SdlDisplay::HEIGHT * 3,
         )
         .position_centered()
         .build()
         .unwrap();
+    let debug_window_id = debug_window.id();
 
-    let canvas2 = window2.into_canvas().build().unwrap();
+    let debug_canvas = debug_window.into_canvas().build().unwrap();
 
     let mut event_pump = sdl_context.event_pump().unwrap();
 
-    let display = SdlDisplay::new(canvas);
-    let debug_display = SdlDebugDisplay::new(canvas2);
+    let display = SdlDisplay::new(display_canvas);
+    let debug_display = SdlDebugDisplay::new(debug_canvas);
     let input = SdlInput::new();
-    let mut nes = Nes::new(game_file, display, debug_display, input).expect("Could not start the game");
+    let mut nes =
+        Nes::new(game_file, display, debug_display, input).expect("Could not start the game");
+
+    let mut paused = true;
+    let mut run_one_instruction = false;
 
     'main_loop: loop {
         let start_time = std::time::Instant::now();
 
         for event in event_pump.poll_iter() {
-            event.get_window_id();
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'main_loop,
-                _ => {}
+            if event.get_window_id() == Some(display_window_id) {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => break 'main_loop,
+                    _ => {}
+                }
+            }
+            if event.get_window_id() == Some(debug_window_id) {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => break 'main_loop,
+                    Event::KeyDown {
+                        keycode, repeat, ..
+                    } => {
+                        if keycode == Some(Keycode::Return) && repeat == false {
+                            run_one_instruction = true;
+                        }
+                        if keycode == Some(Keycode::Space) && repeat == false {
+                            paused = !paused;
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
-        nes.run_one_cpu_instruction();
+        if paused && run_one_instruction {
+            nes.run_one_cpu_instruction();
+            run_one_instruction = false;
+        }
+        if !paused {
+            nes.run_one_cpu_instruction();
 
-        // 1fps
-        // let nanos_to_sleep = Duration::from_nanos(1_000_000_000).saturating_sub(start_time.elapsed());
+            // 1fps
+            // let nanos_to_sleep = Duration::from_nanos(1_000_000_000).saturating_sub(start_time.elapsed());
 
-        // 60fps
-        let nanos_to_sleep = Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
+            // 60fps
+            let nanos_to_sleep =
+                Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
 
-        if nanos_to_sleep != Duration::ZERO {
-            std::thread::sleep(nanos_to_sleep);
+            if nanos_to_sleep != Duration::ZERO {
+                std::thread::sleep(nanos_to_sleep);
+            }
         }
     }
 }

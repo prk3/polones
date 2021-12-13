@@ -49,15 +49,13 @@ pub struct Nes {
     pub ppu_ram: RefCell<PpuRam>,
 
     display: RefCell<Box<dyn Display>>,
-    debug_display: RefCell<Box<dyn DebugDisplay>>,
     input: RefCell<Box<dyn Input>>,
 }
 
 impl Nes {
-    pub fn new<D: Display + 'static, DD: DebugDisplay + 'static, I: Input + 'static>(
+    pub fn new<D: Display + 'static, I: Input + 'static>(
         game: GameFile,
         display: D,
-        debug_display: DD,
         input: I,
     ) -> Result<Self, &'static str> {
         let mapper = RefCell::new(mapper_from_game_file(game)?);
@@ -66,7 +64,6 @@ impl Nes {
         let ppu = RefCell::new(Ppu::new());
         let ppu_ram = RefCell::new(PpuRam::new());
         let display = RefCell::new(Box::new(display));
-        let debug_display = RefCell::new(Box::new(debug_display));
         let input = RefCell::new(Box::new(input));
 
         let nes = Self {
@@ -76,7 +73,6 @@ impl Nes {
             ppu,
             ppu_ram,
             display,
-            debug_display,
             input,
         };
 
@@ -132,11 +128,8 @@ impl Nes {
             self.ppu.borrow_mut().tick(&self);
             self.ppu.borrow_mut().tick(&self);
             if self.cpu.borrow().finished_instruction() {
-                self.debug_display.borrow_mut().display(self);
                 break;
             }
         }
     }
-    pub fn run_one_clock_tick() {}
-    pub fn run_one_frame(&mut self) {}
 }

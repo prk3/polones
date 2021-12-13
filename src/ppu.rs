@@ -94,10 +94,10 @@ impl ControlRegister {
     flag_methods!(get_background_tile_select, set_background_tile_select, 4);
     flag_methods!(get_sprite_tile_select,     set_sprite_tile_select,     3);
     flag_methods!(get_increment_mode,         set_increment_mode,         2);
-    fn get_name_table_address(&self) -> u8 {
+    pub fn get_name_table_address(&self) -> u8 {
         self.0 & 0b00000011
     }
-    fn set_name_table_select(&mut self, new: u8) {
+    pub fn set_name_table_select(&mut self, new: u8) {
         self.0 = (self.0 & 0b11111100) | (new & 0b00000011);
     }
 }
@@ -135,21 +135,21 @@ impl StatusRegister {
 }
 
 pub struct Ppu {
-    scanline: u16,
-    pixel: u16,
+    pub scanline: u16,
+    pub pixel: u16,
 
-    control_register: ControlRegister,
-    mask_register: MaskRegister,
-    status_register: StatusRegister,
-    vblank: bool,
-    scroll_latch: bool,
-    ppu_address: u16,
-    ppu_address_latch: bool,
-    oam_address: u8,
-    horizontal_scroll: u8,
-    vertical_scroll: u8,
-    vertical_scroll_next_frame: u8,
-    buffer: Box<Frame>,
+    pub control_register: ControlRegister,
+    pub mask_register: MaskRegister,
+    pub status_register: StatusRegister,
+    pub vblank: bool,
+    pub scroll_latch: bool,
+    pub ppu_address: u16,
+    pub ppu_address_latch: bool,
+    pub oam_address: u8,
+    pub horizontal_scroll: u8,
+    pub vertical_scroll: u8,
+    pub vertical_scroll_next_frame: u8,
+    pub buffer: Box<Frame>,
 }
 
 impl Ppu {
@@ -172,6 +172,7 @@ impl Ppu {
             buffer: Box::new([[(0, 0, 0); 256]; 240]),
         }
     }
+
     pub fn tick(&mut self, nes: &Nes) {
         if self.scanline == 241 && self.pixel == 1 {
             self.vblank = true;
@@ -180,6 +181,17 @@ impl Ppu {
             self.vblank = false;
             // TODO clear sprite 0
             // TODO clear overflow
+        }
+
+        if self.pixel == 340 {
+            self.pixel = 0;
+            if self.scanline == 261 {
+                self.scanline = 0;
+            } else {
+                self.scanline += 1;
+            }
+        } else {
+            self.pixel += 1;
         }
     }
 

@@ -10,7 +10,7 @@ fn reads_all_game_files() {
         let path = entry.unwrap().path();
         println!("reading {}", path.display());
         let contents = fs::read(&path).unwrap();
-        let game_file = GameFile::read(contents).unwrap();
+        let game_file = GameFile::read(path.display().to_string(), contents).unwrap();
         println!("read    {}, format {:?}, mapper {}", path.display(), game_file.format, game_file.mapper);
     }
 }

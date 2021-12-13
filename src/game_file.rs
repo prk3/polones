@@ -1,4 +1,5 @@
 pub struct GameFile {
+    name: String,
     data: Vec<u8>,
     pub format: FileFormat,
     pub mapper: u16,
@@ -16,7 +17,7 @@ pub enum FileFormat {
 }
 
 impl GameFile {
-    pub fn read(data: Vec<u8>) -> Result<Self, ()> {
+    pub fn read(name: String, data: Vec<u8>) -> Result<Self, ()> {
         let mut read: usize = 0;
         let assert_has_bytes = |bytes: usize| {
             if data.len() >= bytes {
@@ -194,6 +195,7 @@ impl GameFile {
         };
 
         Ok(Self {
+            name,
             data,
             format,
             mapper,

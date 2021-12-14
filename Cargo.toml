@@ -14,4 +14,4 @@ name = "nes_lib"
 path = "src/nes_lib.rs"
 
 [dependencies]
-sdl2 = "0.34.2"
+sdl2 = "0.35.1"

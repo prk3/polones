@@ -4,7 +4,6 @@ use crate::mapper::{mapper_from_game_file, Mapper};
 use crate::cpu_ram::CpuRam;
 use crate::ppu::Ppu;
 use crate::ppu_ram::PpuRam;
-use std::borrow::Borrow;
 use std::cell::RefCell;
 
 pub type Frame = [[(u8, u8, u8); 256]; 240];
@@ -13,12 +12,6 @@ pub type Frame = [[(u8, u8, u8); 256]; 240];
 pub trait Display {
     /// Draws a frame to the screen.
     fn display(&mut self, frame: Box<Frame>);
-}
-
-/// Abstraction over display showing NES debugging info.
-pub trait DebugDisplay {
-    /// Draws NES debug info to the screen.
-    fn display(&mut self, nes: &Nes);
 }
 
 pub struct InputData {

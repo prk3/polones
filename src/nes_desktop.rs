@@ -1,14 +1,13 @@
 use nes_lib::*;
 
 use nes_lib::game_file::GameFile;
-use nes_lib::nes::{DebugDisplay, Display, Frame, Input, Nes};
+use nes_lib::nes::{Display, Frame, Input, Nes};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -471,17 +470,15 @@ impl SdlDebugDisplay {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         let texture_creator = Rc::new(canvas.texture_creator());
-        let mut data = [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
-        let surface = Surface::from_data(
-            &mut data[..],
-            Self::WIDTH,
-            Self::HEIGHT,
-            Self::WIDTH * 4,
-            PixelFormatEnum::RGB24,
-        )
-        .unwrap();
-        let texture = texture_creator
-            .create_texture_from_surface(&surface)
+        let mut texture = texture_creator
+            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
+            .unwrap();
+        texture
+            .with_lock(None, |data, _pitch| {
+                for byte in data {
+                    *byte = 0;
+                }
+            })
             .unwrap();
         canvas.clear();
         canvas.present();
@@ -510,6 +507,9 @@ impl SdlDebugDisplay {
         col: u8,
         color: (u8, u8, u8),
     ) {
+        use std::io::Write;
+        use std::str;
+
         let (operation, mode) = self.disassembly[address as usize].unwrap_opcode();
         let tb = &mut self.text_buffer;
 
@@ -530,9 +530,17 @@ impl SdlDebugDisplay {
             _ => {}
         }
 
-        let operation_str = format!("{:?}", operation);
+        let mut operation_str_buffer = [0u8; 3];
+        write!(&mut operation_str_buffer[..], "{:?}", operation).unwrap();
+
         tb.write_u16_with_color(address, line, col + 2, color);
-        tb.write_str_with_color(&operation_str, line, col + 7, operation.color());
+        tb.write_str_with_color(
+            // SAFE: operation strings are always 3 ASCII characters
+            unsafe { str::from_utf8_unchecked(&operation_str_buffer[..]) },
+            line,
+            col + 7,
+            operation.color(),
+        );
 
         // todo handle the case when next byte overflows address
         match mode {
@@ -768,25 +776,7 @@ impl SdlDebugDisplay {
             }
         }
     }
-}
 
-fn serialize_breakpoints(breakpoints: &[u16]) -> String {
-    let mut output = String::new();
-    for b in breakpoints.iter() {
-        write!(&mut output, "{}\n", *b);
-    }
-    output
-}
-
-fn deserialize_breakpoints(string: String) -> Vec<u16> {
-    string
-        .split('\n')
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| line.parse::<u16>().ok())
-        .collect()
-}
-
-impl DebugDisplay for SdlDebugDisplay {
     fn display(&mut self, nes: &Nes) {
         self.fill_instructions(nes);
 
@@ -884,11 +874,15 @@ impl DebugDisplay for SdlDebugDisplay {
         }
 
         self.texture
-            .update(
-                Rect::new(0, 0, Self::WIDTH, Self::HEIGHT),
-                &self.text_buffer.as_texture_data(),
-                Self::WIDTH as usize * 4,
-            )
+            .with_lock(None, |data, _pitch| {
+                self.text_buffer
+                    .as_texture_data()
+                    .iter()
+                    .zip(data.iter_mut())
+                    .for_each(|(src, dst)| {
+                        *dst = *src;
+                    });
+            })
             .unwrap();
 
         self.canvas
@@ -905,6 +899,22 @@ impl DebugDisplay for SdlDebugDisplay {
             .unwrap();
         self.canvas.present();
     }
+}
+
+fn serialize_breakpoints(breakpoints: &[u16]) -> String {
+    let mut output = String::new();
+    for b in breakpoints.iter() {
+        write!(&mut output, "{}\n", *b).unwrap();
+    }
+    output
+}
+
+fn deserialize_breakpoints(string: String) -> Vec<u16> {
+    string
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| line.parse::<u16>().ok())
+        .collect()
 }
 
 struct SdlPpuDebugDisplay {
@@ -1096,7 +1106,7 @@ fn main() {
     let mut nes = Nes::new(game_file, display.clone(), input).expect("Could not start the game");
 
     let mut state = EmulatorState {
-        running: false,
+        running: true,
         exit: false,
         one_step: false,
         stop_on_program_counter: None,
@@ -1105,6 +1115,8 @@ fn main() {
     display.actual_display();
     debug_display.display(&nes);
     ppu_debug_display.display(&nes);
+
+    let mut i = 0;
 
     loop {
         let start_time = std::time::Instant::now();
@@ -1128,7 +1140,10 @@ fn main() {
             state.one_step = false;
         } else if state.running {
             nes.run_one_cpu_instruction();
-            if debug_display.breakpoints.contains(&nes.cpu.borrow().program_counter) {
+            if debug_display
+                .breakpoints
+                .contains(&nes.cpu.borrow().program_counter)
+            {
                 state.running = false;
             }
         }
@@ -1144,6 +1159,11 @@ fn main() {
             if nanos_to_sleep != Duration::ZERO {
                 std::thread::sleep(nanos_to_sleep);
             }
+        }
+
+        i += 1;
+        if i > 200 {
+            break;
         }
     }
 }

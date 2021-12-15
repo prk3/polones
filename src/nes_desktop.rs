@@ -15,95 +15,111 @@ use std::time::Duration;
 
 const FONT: &[u8; 16 * 32] = include_bytes!("../resources/comodore-64-font.bin");
 
-const BLACK: (u8, u8, u8) = (0, 0, 0);
-const RED: (u8, u8, u8) = (255, 0, 0);
-const GREEN: (u8, u8, u8) = (0, 255, 0);
-const BLUE: (u8, u8, u8) = (0, 0, 255);
-const YELLOW: (u8, u8, u8) = (255, 255, 0);
-const CYAN: (u8, u8, u8) = (0, 255, 255);
-const MAGENTA: (u8, u8, u8) = (255, 0, 255);
-const WHITE: (u8, u8, u8) = (255, 255, 255);
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum Color {
+    Black = 0b000,
+    Red = 0b100,
+    Green = 0b010,
+    Blue = 0b001,
+    Yellow = 0b110,
+    Cyan = 0b011,
+    Magenta = 0b101,
+    White = 0b111,
+}
+use Color::*;
 
-struct TextBuffer<const W: usize, const H: usize> {
-    buffer: [[(u8, u8, u8, u8); W]; H],
+struct TextArea<const W: usize, const H: usize> {
+    buffer: [[(u8, Color); W]; H],
 }
 
-impl<const W: usize, const H: usize> TextBuffer<W, H> {
+impl<const W: usize, const H: usize> TextArea<W, H> {
     fn new() -> Self {
         Self {
-            buffer: [[(0, 0, 0, 0); W]; H],
+            buffer: [[(0b100000, Black); W]; H],
         }
     }
 
     fn clear(&mut self) {
-        for y in 0..H {
-            for x in 0..W {
-                self.buffer[y][x] = (0, 0, 0, 0);
-            }
-        }
+        *self = Self::new();
     }
 
-    fn as_texture_data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(&self.buffer[0][0].0, W * H * 4) }
-    }
-
-    fn write_char_with_color(&mut self, value: char, line: u8, col: u8, color: (u8, u8, u8)) {
-        if (line as usize) < H / 8 && (col as usize) < W / 8 {
-            let (char_row, char_col) = match value {
-                _c @ 'A'..='O' => (0, 1 + (value as u8 - 'A' as u8)),
-                _c @ 'a'..='o' => (0, 1 + (value as u8 - 'a' as u8)),
-                _c @ 'P'..='Z' => (1, value as u8 - 'P' as u8),
-                _c @ 'p'..='z' => (1, value as u8 - 'p' as u8),
-                _c @ '0'..='9' => (3, value as u8 - '0' as u8),
-                '@' => (0, 0),
-                '[' => (1, 11),
-                '£' => (1, 12),
-                ']' => (1, 13),
-                '↑' => (1, 14),
-                '←' => (1, 15),
-                ' ' => (2, 0),
-                '!' => (2, 1),
-                '"' => (2, 2),
-                '#' => (2, 3),
-                '$' => (2, 4),
-                '%' => (2, 5),
-                '&' => (2, 6),
-                '\'' => (2, 7),
-                '(' => (2, 8),
-                ')' => (2, 9),
-                '*' => (2, 10),
-                '+' => (2, 11),
-                ',' => (2, 12),
-                '-' => (2, 13),
-                '.' => (2, 14),
-                '/' => (2, 15),
-                ':' => (3, 10),
-                ';' => (3, 11),
-                '<' => (3, 12),
-                '=' => (3, 13),
-                '>' => (3, 14),
-                '?' => (3, 15),
-                _ => (3, 15),
-            };
-
-            for y in 0..8 {
-                let mut row = FONT[((char_row as usize * 8) + y) * 16 + char_col as usize];
-                for x in 0..8 {
-                    let (r, g, b) = if row & 0b10000000 > 0 {
-                        color
-                    } else {
-                        (0, 0, 0)
-                    };
-                    let line = line as usize;
-                    let col = col as usize;
-                    self.buffer[line * 8 + y][col * 8 + x] = (b, g, r, 0);
-                    row = row << 1;
+    fn draw_to_texture(&self, bytes: &mut [u8]) {
+        let mut bytes_i = 0;
+        for row in self.buffer {
+            for scan in 0..8 {
+                for (ch, color) in row {
+                    let r = ((color as u8 & 0b100) >> 2) * 255;
+                    let g = ((color as u8 & 0b010) >> 1) * 255;
+                    let b = ((color as u8 & 0b001) >> 0) * 255;
+                    let char_row = ch >> 4;
+                    let char_col = ch & 0b1111;
+                    let mut slice =
+                        FONT[(((char_row as usize * 8) + scan) * 16) + char_col as usize];
+                    for _ in 0..8 {
+                        if slice & 0b10000000 > 0 {
+                            bytes[bytes_i + 0] = b;
+                            bytes[bytes_i + 1] = g;
+                            bytes[bytes_i + 2] = r;
+                        } else {
+                            bytes[bytes_i + 0] = 0;
+                            bytes[bytes_i + 1] = 0;
+                            bytes[bytes_i + 2] = 0;
+                        }
+                        slice <<= 1;
+                        bytes_i += 4;
+                    }
                 }
             }
         }
     }
 
-    fn write_str_with_color(&mut self, value: &str, line: u8, col: u8, color: (u8, u8, u8)) {
+    fn write_char_with_color(&mut self, value: char, line: u8, col: u8, color: Color) {
+        if (line as usize) >= H || (col as usize) >= W {
+            return;
+        }
+
+        let (char_row, char_col) = match value {
+            _c @ 'A'..='O' => (0, 1 + (value as u8 - 'A' as u8)),
+            _c @ 'a'..='o' => (0, 1 + (value as u8 - 'a' as u8)),
+            _c @ 'P'..='Z' => (1, value as u8 - 'P' as u8),
+            _c @ 'p'..='z' => (1, value as u8 - 'p' as u8),
+            _c @ '0'..='9' => (3, value as u8 - '0' as u8),
+            '@' => (0, 0),
+            '[' => (1, 11),
+            '£' => (1, 12),
+            ']' => (1, 13),
+            '↑' => (1, 14),
+            '←' => (1, 15),
+            ' ' => (2, 0),
+            '!' => (2, 1),
+            '"' => (2, 2),
+            '#' => (2, 3),
+            '$' => (2, 4),
+            '%' => (2, 5),
+            '&' => (2, 6),
+            '\'' => (2, 7),
+            '(' => (2, 8),
+            ')' => (2, 9),
+            '*' => (2, 10),
+            '+' => (2, 11),
+            ',' => (2, 12),
+            '-' => (2, 13),
+            '.' => (2, 14),
+            '/' => (2, 15),
+            ':' => (3, 10),
+            ';' => (3, 11),
+            '<' => (3, 12),
+            '=' => (3, 13),
+            '>' => (3, 14),
+            '?' => (3, 15),
+            _ => (3, 15),
+        };
+
+        self.buffer[line as usize][col as usize] = (char_row << 4 | char_col, color);
+    }
+
+    fn write_str_with_color(&mut self, value: &str, line: u8, col: u8, color: Color) {
         let mut col = col;
         for c in value.chars() {
             self.write_char_with_color(c, line, col, color);
@@ -111,7 +127,7 @@ impl<const W: usize, const H: usize> TextBuffer<W, H> {
         }
     }
 
-    fn write_u8_with_color(&mut self, value: u8, line: u8, col: u8, color: (u8, u8, u8)) {
+    fn write_u8_with_color(&mut self, value: u8, line: u8, col: u8, color: Color) {
         let hex2 = value >> 4 & 0b1111;
         let hex1 = value >> 0 & 0b1111;
         let num_to_char = |c| {
@@ -126,7 +142,7 @@ impl<const W: usize, const H: usize> TextBuffer<W, H> {
         self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(1), color);
     }
 
-    fn write_u16_with_color(&mut self, value: u16, line: u8, col: u8, color: (u8, u8, u8)) {
+    fn write_u16_with_color(&mut self, value: u16, line: u8, col: u8, color: Color) {
         let hex4 = value >> 12 & 0b1111;
         let hex3 = value >> 8 & 0b1111;
         let hex2 = value >> 4 & 0b1111;
@@ -145,7 +161,7 @@ impl<const W: usize, const H: usize> TextBuffer<W, H> {
         self.write_char_with_color(num_to_char(hex1), line, col.saturating_add(3), color);
     }
 
-    fn write_bool_with_color(&mut self, value: bool, line: u8, col: u8, color: (u8, u8, u8)) {
+    fn write_bool_with_color(&mut self, value: bool, line: u8, col: u8, color: Color) {
         self.write_char_with_color(
             char::from_u32('0' as u32 + value as u32).unwrap(),
             line,
@@ -397,31 +413,31 @@ enum Operation {
 }
 
 impl Operation {
-    fn color(self) -> (u8, u8, u8) {
+    fn color(self) -> Color {
         use Operation::*;
         match self {
             // load and store
-            LDA | LDX | LDY | STA | STX | STY => GREEN,
+            LDA | LDX | LDY | STA | STX | STY => Green,
             // transfer
-            TAX | TAY | TSX | TXA | TXS | TYA => YELLOW,
+            TAX | TAY | TSX | TXA | TXS | TYA => Yellow,
             // stack
-            PHA | PHP | PLA | PLP => BLUE,
+            PHA | PHP | PLA | PLP => Blue,
             // shift
-            ASL | LSR | ROL | ROR => CYAN,
+            ASL | LSR | ROL | ROR => Cyan,
             // logic
-            AND | BIT | EOR | ORA => CYAN,
+            AND | BIT | EOR | ORA => Cyan,
             // arithmetic
-            ADC | CMP | CPX | CPY | SBC => WHITE,
+            ADC | CMP | CPX | CPY | SBC => White,
             // increment and decrement
-            DEC | DEX | DEY | INC | INX | INY => WHITE,
+            DEC | DEX | DEY | INC | INX | INY => White,
             // control
-            BRK | JMP | JSR | RTI | RTS => RED,
+            BRK | JMP | JSR | RTI | RTS => Red,
             // branch
-            BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS => RED,
+            BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS => Red,
             // flags
-            CLC | CLD | CLI | CLV | SEC | SED | SEI => MAGENTA,
+            CLC | CLD | CLI | CLV | SEC | SED | SEI => Magenta,
             // nop
-            NOP | XXX => RED,
+            NOP | XXX => Red,
         }
     }
 }
@@ -430,7 +446,7 @@ struct SdlDebugDisplay {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
-    text_buffer: TextBuffer<{ Self::WIDTH as usize }, { Self::HEIGHT as usize }>,
+    text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
     breakpoint_mode: bool,
     breakpoint_address: u16,
     breakpoint_pos: i8,
@@ -495,7 +511,7 @@ impl SdlDebugDisplay {
             breakpoint_address: 0,
             breakpoint_pos: 0,
             breakpoints,
-            text_buffer: TextBuffer::new(),
+            text_area: TextArea::new(),
             disassembly: [InstructionTableValue::Unknown; 1 << 16],
         }
     }
@@ -505,13 +521,13 @@ impl SdlDebugDisplay {
         address: u16,
         line: u8,
         col: u8,
-        color: (u8, u8, u8),
+        color: Color,
     ) {
         use std::io::Write;
         use std::str;
 
         let (operation, mode) = self.disassembly[address as usize].unwrap_opcode();
-        let tb = &mut self.text_buffer;
+        let ta = &mut self.text_area;
 
         match (
             self.breakpoint_mode,
@@ -519,13 +535,13 @@ impl SdlDebugDisplay {
             self.breakpoints.contains(&address),
         ) {
             (true, true, true) => {
-                tb.write_char_with_color('B', line, col, YELLOW);
+                ta.write_char_with_color('B', line, col, Yellow);
             }
             (true, true, false) => {
-                tb.write_char_with_color('*', line, col, YELLOW);
+                ta.write_char_with_color('*', line, col, Yellow);
             }
             (_, _, true) => {
-                tb.write_char_with_color('B', line, col, RED);
+                ta.write_char_with_color('B', line, col, Red);
             }
             _ => {}
         }
@@ -533,8 +549,8 @@ impl SdlDebugDisplay {
         let mut operation_str_buffer = [0u8; 3];
         write!(&mut operation_str_buffer[..], "{:?}", operation).unwrap();
 
-        tb.write_u16_with_color(address, line, col + 2, color);
-        tb.write_str_with_color(
+        ta.write_u16_with_color(address, line, col + 2, color);
+        ta.write_str_with_color(
             // SAFE: operation strings are always 3 ASCII characters
             unsafe { str::from_utf8_unchecked(&operation_str_buffer[..]) },
             line,
@@ -545,80 +561,80 @@ impl SdlDebugDisplay {
         // todo handle the case when next byte overflows address
         match mode {
             AddressingMode::Accumulator => {
-                tb.write_char_with_color('A', line, col + 11, RED);
+                ta.write_char_with_color('A', line, col + 11, Red);
             }
             AddressingMode::Absolute => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, WHITE);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
             }
             AddressingMode::AbsoluteXIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, WHITE);
-                tb.write_str_with_color(",X", line, col + 16, RED);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
+                ta.write_str_with_color(",X", line, col + 16, Red);
             }
             AddressingMode::AbsoluteYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, WHITE);
-                tb.write_str_with_color(",Y", line, col + 16, RED);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
+                ta.write_str_with_color(",Y", line, col + 16, Red);
             }
             AddressingMode::Immediate => {
                 let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('#', line, col + 11, RED);
-                tb.write_char_with_color('$', line, col + 12, YELLOW);
-                tb.write_u8_with_color(byte, line, col + 13, WHITE);
+                ta.write_char_with_color('#', line, col + 11, Red);
+                ta.write_char_with_color('$', line, col + 12, Yellow);
+                ta.write_u8_with_color(byte, line, col + 13, White);
             }
             AddressingMode::Implied => {}
             AddressingMode::Indirect => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
                 let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                tb.write_char_with_color('(', line, col + 11, RED);
-                tb.write_char_with_color('$', line, col + 12, YELLOW);
-                tb.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 13, WHITE);
-                tb.write_char_with_color(')', line, col + 17, RED);
+                ta.write_char_with_color('(', line, col + 11, Red);
+                ta.write_char_with_color('$', line, col + 12, Yellow);
+                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 13, White);
+                ta.write_char_with_color(')', line, col + 17, Red);
             }
             AddressingMode::XIndexedIndirect => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('(', line, col + 11, RED);
-                tb.write_char_with_color('$', line, col + 12, YELLOW);
-                tb.write_u8_with_color(low, line, col + 13, WHITE);
-                tb.write_str_with_color(",X)", line, col + 15, RED);
+                ta.write_char_with_color('(', line, col + 11, Red);
+                ta.write_char_with_color('$', line, col + 12, Yellow);
+                ta.write_u8_with_color(low, line, col + 13, White);
+                ta.write_str_with_color(",X)", line, col + 15, Red);
             }
             AddressingMode::IndirectYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('(', line, col + 11, RED);
-                tb.write_char_with_color('$', line, col + 12, YELLOW);
-                tb.write_u8_with_color(low, line, col + 13, WHITE);
-                tb.write_str_with_color("),Y", line, col + 15, RED);
+                ta.write_char_with_color('(', line, col + 11, Red);
+                ta.write_char_with_color('$', line, col + 12, Yellow);
+                ta.write_u8_with_color(low, line, col + 13, White);
+                ta.write_str_with_color("),Y", line, col + 15, Red);
             }
             AddressingMode::Relative => {
                 // TODO has the same syntax as zeropage, maybe indicate which one is it?
                 let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u8_with_color(byte, line, col + 12, WHITE);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u8_with_color(byte, line, col + 12, White);
             }
             AddressingMode::Zeropage => {
                 // TODO has the same syntax as relative, maybe indicate which one is it?
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u8_with_color(low, line, col + 12, WHITE);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u8_with_color(low, line, col + 12, White);
             }
             AddressingMode::ZeropageXIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u8_with_color(low, line, col + 12, WHITE);
-                tb.write_str_with_color(",X", line, col + 14, RED);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u8_with_color(low, line, col + 12, White);
+                ta.write_str_with_color(",X", line, col + 14, Red);
             }
             AddressingMode::ZeropageYIndexed => {
                 let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                tb.write_char_with_color('$', line, col + 11, YELLOW);
-                tb.write_u8_with_color(low, line, col + 12, WHITE);
-                tb.write_str_with_color(",Y", line, col + 14, RED);
+                ta.write_char_with_color('$', line, col + 11, Yellow);
+                ta.write_u8_with_color(low, line, col + 12, White);
+                ta.write_str_with_color(",Y", line, col + 14, Red);
             }
         }
     }
@@ -777,72 +793,74 @@ impl SdlDebugDisplay {
         }
     }
 
-    fn display(&mut self, nes: &Nes) {
+    fn update(&mut self, nes: &Nes) {
         self.fill_instructions(nes);
+    }
 
+    fn show(&mut self, nes: &Nes) {
         self.canvas.clear();
-        self.text_buffer.clear();
+        self.text_area.clear();
         let cpu = nes.cpu.borrow();
-        let tb = &mut self.text_buffer;
+        let ta = &mut self.text_area;
 
-        tb.write_str_with_color("A", 0, 1, YELLOW);
-        tb.write_u8_with_color(cpu.accumulator, 0, 3, WHITE);
+        ta.write_str_with_color("A", 0, 1, Yellow);
+        ta.write_u8_with_color(cpu.accumulator, 0, 3, White);
 
-        tb.write_str_with_color("X", 1, 1, YELLOW);
-        tb.write_u8_with_color(cpu.x_index, 1, 3, WHITE);
+        ta.write_str_with_color("X", 1, 1, Yellow);
+        ta.write_u8_with_color(cpu.x_index, 1, 3, White);
 
-        tb.write_str_with_color("Y", 2, 1, YELLOW);
-        tb.write_u8_with_color(cpu.y_index, 2, 3, WHITE);
+        ta.write_str_with_color("Y", 2, 1, Yellow);
+        ta.write_u8_with_color(cpu.y_index, 2, 3, White);
 
-        tb.write_str_with_color("SP", 3, 0, YELLOW);
-        tb.write_u8_with_color(cpu.stack_pointer, 3, 3, WHITE);
+        ta.write_str_with_color("SP", 3, 0, Yellow);
+        ta.write_u8_with_color(cpu.stack_pointer, 3, 3, White);
 
-        tb.write_str_with_color("PC", 4, 0, YELLOW);
-        tb.write_u16_with_color(cpu.program_counter, 4, 3, WHITE);
+        ta.write_str_with_color("PC", 4, 0, Yellow);
+        ta.write_u16_with_color(cpu.program_counter, 4, 3, White);
 
-        tb.write_str_with_color("SR", 5, 0, YELLOW);
+        ta.write_str_with_color("SR", 5, 0, Yellow);
 
-        tb.write_str_with_color("N", 6, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_negative(), 6, 3, WHITE);
+        ta.write_str_with_color("N", 6, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_negative(), 6, 3, White);
 
-        tb.write_str_with_color("V", 7, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_overflow(), 7, 3, WHITE);
+        ta.write_str_with_color("V", 7, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_overflow(), 7, 3, White);
 
-        tb.write_str_with_color("-", 8, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_ignored(), 8, 3, WHITE);
+        ta.write_str_with_color("-", 8, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_ignored(), 8, 3, White);
 
-        tb.write_str_with_color("B", 9, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_break(), 9, 3, WHITE);
+        ta.write_str_with_color("B", 9, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_break(), 9, 3, White);
 
-        tb.write_str_with_color("D", 10, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_decimal(), 10, 3, WHITE);
+        ta.write_str_with_color("D", 10, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_decimal(), 10, 3, White);
 
-        tb.write_str_with_color("I", 11, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_interrupt(), 11, 3, WHITE);
+        ta.write_str_with_color("I", 11, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_interrupt(), 11, 3, White);
 
-        tb.write_str_with_color("Z", 12, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_zero(), 12, 3, WHITE);
+        ta.write_str_with_color("Z", 12, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_zero(), 12, 3, White);
 
-        tb.write_str_with_color("C", 13, 1, YELLOW);
-        tb.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, WHITE);
+        ta.write_str_with_color("C", 13, 1, Yellow);
+        ta.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, White);
 
         if self.breakpoint_mode {
-            tb.write_char_with_color('B', 29, 0, RED);
+            ta.write_char_with_color('B', 29, 0, Red);
         }
 
         let mut address = cpu.program_counter;
-        let mut color = RED;
+        let mut color = Red;
         let mut line = 14;
 
         loop {
             if let InstructionTableValue::Opcode(_, _) = self.disassembly[address as usize] {
                 let effective_color = if address == cpu.program_counter {
-                    YELLOW
+                    Yellow
                 } else {
                     color
                 };
                 self.write_instruction_from_disassembly(address, line, 11, effective_color);
-                color = WHITE;
+                color = White;
                 if line == 0 {
                     break;
                 }
@@ -860,7 +878,7 @@ impl SdlDebugDisplay {
 
             loop {
                 if let InstructionTableValue::Opcode(_, _) = self.disassembly[address as usize] {
-                    self.write_instruction_from_disassembly(address, line, 11, WHITE);
+                    self.write_instruction_from_disassembly(address, line, 11, White);
                     if line == 31 {
                         break;
                     }
@@ -875,13 +893,7 @@ impl SdlDebugDisplay {
 
         self.texture
             .with_lock(None, |data, _pitch| {
-                self.text_buffer
-                    .as_texture_data()
-                    .iter()
-                    .zip(data.iter_mut())
-                    .for_each(|(src, dst)| {
-                        *dst = *src;
-                    });
+                self.text_area.draw_to_texture(data);
             })
             .unwrap();
 
@@ -904,7 +916,7 @@ impl SdlDebugDisplay {
 fn serialize_breakpoints(breakpoints: &[u16]) -> String {
     let mut output = String::new();
     for b in breakpoints.iter() {
-        write!(&mut output, "{}\n", *b).unwrap();
+        write!(&mut output, "{:04X}\n", *b).unwrap();
     }
     output
 }
@@ -913,15 +925,149 @@ fn deserialize_breakpoints(string: String) -> Vec<u16> {
     string
         .split('\n')
         .filter(|line| !line.is_empty())
-        .filter_map(|line| line.parse::<u16>().ok())
+        .filter_map(|line| u16::from_str_radix(line, 16).ok())
         .collect()
+}
+
+struct SdlMemoryDisplay {
+    canvas: sdl2::render::WindowCanvas,
+    _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
+    texture: sdl2::render::Texture<'static>,
+    text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
+    page: u8,
+}
+
+impl SdlMemoryDisplay {
+    const WIDTH: u32 = 384;
+    const HEIGHT: u32 = 360;
+
+    fn new(canvas: sdl2::render::WindowCanvas) -> Self {
+        let mut canvas = canvas;
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
+        let texture_creator = Rc::new(canvas.texture_creator());
+        let mut texture = texture_creator
+            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
+            .unwrap();
+        texture
+            .with_lock(None, |data, _pitch| {
+                for byte in data {
+                    *byte = 0;
+                }
+            })
+            .unwrap();
+        canvas.clear();
+        canvas.present();
+
+        let breakpoints = std::fs::read_to_string("./breakpoints")
+            .map(|s| deserialize_breakpoints(s))
+            .unwrap_or(Vec::new());
+
+        Self {
+            canvas,
+            texture: unsafe { std::mem::transmute(texture) },
+            _texture_creator: texture_creator,
+            text_area: TextArea::new(),
+            page: 0,
+        }
+    }
+
+    fn update(&mut self, nes: &Nes) {}
+
+    fn show(&mut self, nes: &Nes) {
+        let start_address = 256u16 * self.page as u16;
+        let ta = &mut self.text_area;
+
+        ta.write_str_with_color("START", 0, 0, Yellow);
+        ta.write_u16_with_color(start_address, 0, 6, White);
+        ta.write_str_with_color("< >", 0, 11, Yellow);
+
+        self.text_area.write_str_with_color(
+            " 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
+            2,
+            0,
+            Yellow,
+        );
+
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                self.text_area.write_u8_with_color(
+                    nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                    3 + y * 2,
+                    1 + x * 3,
+                    if x % 2 == 0 { White } else { Cyan },
+                );
+            }
+        }
+
+        for row in 0..16u8 {
+            self.text_area.write_char_with_color(
+                char::from_u32(if row < 10 {
+                    '0' as u32 + row as u32
+                } else {
+                    'A' as u32 + row as u32 - 10
+                })
+                .unwrap(),
+                3 + row * 2,
+                0,
+                Yellow,
+            );
+        }
+
+        self.texture
+            .with_lock(None, |data, _pitch| {
+                self.text_area.draw_to_texture(data);
+            })
+            .unwrap();
+
+        self.canvas
+            .copy(
+                &self.texture,
+                Rect::new(0, 0, Self::WIDTH, Self::HEIGHT),
+                Rect::new(
+                    0,
+                    0,
+                    self.canvas.window().size().0,
+                    self.canvas.window().size().1,
+                ),
+            )
+            .unwrap();
+        self.canvas.present();
+    }
+
+    fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
+        match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::Escape), .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::Up), .. } => {
+                match self.page {
+                    0x00..=0x1F => {
+                        self.page += 1;
+                    }
+                    _ => {}
+                }
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::Down), .. } => {
+                match self.page {
+                    0x01..=0x20 => {
+                        self.page -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 struct SdlPpuDebugDisplay {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
-    text_buffer: TextBuffer<{ Self::WIDTH as usize }, { Self::HEIGHT as usize }>,
+    text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
 }
 
 impl SdlPpuDebugDisplay {
@@ -934,17 +1080,8 @@ impl SdlPpuDebugDisplay {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         let texture_creator = Rc::new(canvas.texture_creator());
-        let mut data = [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
-        let surface = Surface::from_data(
-            &mut data[..],
-            Self::WIDTH,
-            Self::HEIGHT,
-            Self::WIDTH * 4,
-            PixelFormatEnum::RGB24,
-        )
-        .unwrap();
         let texture = texture_creator
-            .create_texture_from_surface(&surface)
+            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
             .unwrap();
         canvas.clear();
         canvas.present();
@@ -952,56 +1089,95 @@ impl SdlPpuDebugDisplay {
             canvas,
             texture: unsafe { std::mem::transmute(texture) },
             _texture_creator: texture_creator,
-            text_buffer: TextBuffer::new(),
+            text_area: TextArea::new(),
         }
     }
 
     fn display(&mut self, nes: &Nes) {
         self.canvas.clear();
-        self.text_buffer.clear();
-        let tb = &mut self.text_buffer;
+        self.text_area.clear();
+        let ta = &mut self.text_area;
         let ppu = nes.ppu.borrow();
 
-        tb.write_str_with_color("SCANLINE", 0, 0, YELLOW);
-        tb.write_u16_with_color(ppu.scanline, 0, 9, WHITE);
+        ta.write_str_with_color("SCANLINE", 0, 0, Yellow);
+        ta.write_u16_with_color(ppu.scanline, 0, 9, White);
 
-        tb.write_str_with_color("PIXEL", 1, 3, YELLOW);
-        tb.write_u16_with_color(ppu.pixel, 1, 9, WHITE);
+        ta.write_str_with_color("PIXEL", 1, 3, Yellow);
+        ta.write_u16_with_color(ppu.pixel, 1, 9, White);
 
-        tb.write_str_with_color("CTRL", 2, 2, YELLOW);
+        ta.write_str_with_color("CTRL", 3, 2, Yellow);
 
-        tb.write_str_with_color("NMI", 3, 3, YELLOW);
-        tb.write_bool_with_color(ppu.control_register.get_nmi_enable(), 3, 7, WHITE);
+        ta.write_str_with_color("NMI", 4, 3, Yellow);
+        ta.write_bool_with_color(ppu.control_register.get_nmi_enable(), 4, 7, White);
 
-        tb.write_str_with_color("M/S", 4, 3, YELLOW);
-        tb.write_bool_with_color(ppu.control_register.get_ppu_master_slave(), 4, 7, WHITE);
+        ta.write_str_with_color("M/S", 5, 3, Yellow);
+        ta.write_bool_with_color(ppu.control_register.get_ppu_master_slave(), 5, 7, White);
 
-        tb.write_str_with_color("HEIGHT", 5, 0, YELLOW);
-        tb.write_bool_with_color(ppu.control_register.get_sprite_height(), 5, 7, WHITE);
+        ta.write_str_with_color("HEIGHT", 6, 0, Yellow);
+        ta.write_bool_with_color(ppu.control_register.get_sprite_height(), 6, 7, White);
 
-        tb.write_str_with_color("BACK", 6, 2, YELLOW);
-        tb.write_bool_with_color(
+        ta.write_str_with_color("BACK", 7, 2, Yellow);
+        ta.write_bool_with_color(
             ppu.control_register.get_background_tile_select(),
-            6,
             7,
-            WHITE,
+            7,
+            White,
         );
 
-        tb.write_str_with_color("SPRITE", 7, 0, YELLOW);
-        tb.write_bool_with_color(ppu.control_register.get_sprite_tile_select(), 7, 7, WHITE);
+        ta.write_str_with_color("SPRITE", 8, 0, Yellow);
+        ta.write_bool_with_color(ppu.control_register.get_sprite_tile_select(), 8, 7, White);
 
-        tb.write_str_with_color("INC", 8, 3, YELLOW);
-        tb.write_bool_with_color(ppu.control_register.get_sprite_height(), 8, 7, WHITE);
+        ta.write_str_with_color("INC", 9, 3, Yellow);
+        ta.write_bool_with_color(ppu.control_register.get_sprite_height(), 9, 7, White);
 
-        tb.write_str_with_color("NTADDR", 9, 0, YELLOW);
-        tb.write_u8_with_color(ppu.control_register.get_name_table_address(), 9, 7, WHITE);
+        ta.write_str_with_color("NTADDR", 10, 0, Yellow);
+        ta.write_u8_with_color(ppu.control_register.get_name_table_address(), 10, 7, White);
+
+        ta.write_str_with_color("MASK", 3, 11, Yellow);
+
+        ta.write_str_with_color("BLUE", 4, 11, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_emphasize_blue(), 4, 16, White);
+
+        ta.write_str_with_color("GREEN", 5, 10, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_emphasize_green(), 5, 16, White);
+
+        ta.write_str_with_color("RED", 6, 12, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_emphasize_red(), 6, 16, White);
+
+        ta.write_str_with_color("SPR", 7, 12, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_show_sprites(), 7, 16, White);
+
+        ta.write_str_with_color("BAC", 8, 12, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_show_background(), 8, 16, White);
+
+        ta.write_str_with_color("SPRL", 9, 11, Yellow);
+        ta.write_bool_with_color(
+            ppu.mask_register.get_show_sprites_in_leftmost_col(),
+            9,
+            16,
+            White,
+        );
+
+        ta.write_str_with_color("BACL", 10, 11, Yellow);
+        ta.write_bool_with_color(
+            ppu.mask_register.get_show_background_in_leftmost_col(),
+            10,
+            16,
+            White,
+        );
+
+        ta.write_str_with_color("STATUS", 3, 18, Yellow);
+
+        ta.write_str_with_color("VBLANK", 4, 18, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_emphasize_blue(), 4, 25, White);
+
+        ta.write_str_with_color("S0H", 5, 21, Yellow);
+        ta.write_bool_with_color(ppu.mask_register.get_emphasize_green(), 5, 25, White);
 
         self.texture
-            .update(
-                Rect::new(0, 0, Self::WIDTH, Self::HEIGHT),
-                &self.text_buffer.as_texture_data(),
-                Self::WIDTH as usize * 4,
-            )
+            .with_lock(None, |data, _pitch| {
+                self.text_area.draw_to_texture(data);
+            })
             .unwrap();
 
         self.canvas
@@ -1069,7 +1245,7 @@ fn main() {
 
     let display_window = video_subsystem
         .window("nes display", SdlDisplay::WIDTH * 3, SdlDisplay::HEIGHT * 3)
-        .position_centered()
+        .position(0, 1)
         .build()
         .unwrap();
     let display_window_id = display_window.id();
@@ -1078,10 +1254,10 @@ fn main() {
     let debug_window = video_subsystem
         .window(
             "nes cpu inspector",
-            SdlDisplay::WIDTH * 3,
-            SdlDisplay::HEIGHT * 3,
+            SdlDebugDisplay::WIDTH * 3,
+            SdlDebugDisplay::HEIGHT * 3,
         )
-        .position_centered()
+        .position(768, 0)
         .build()
         .unwrap();
     let debug_window_id = debug_window.id();
@@ -1090,30 +1266,46 @@ fn main() {
     let ppu_debug_window = video_subsystem
         .window(
             "nes ppu inspector",
-            SdlDisplay::WIDTH * 3,
-            SdlDisplay::HEIGHT * 3,
+            SdlPpuDebugDisplay::WIDTH * 3,
+            SdlPpuDebugDisplay::HEIGHT * 3,
         )
-        .position_centered()
+        .position(768, 720)
         .build()
         .unwrap();
     let ppu_debug_window_id = ppu_debug_window.id();
     let ppu_debug_canvas = ppu_debug_window.into_canvas().build().unwrap();
 
+    let memory_window = video_subsystem
+        .window(
+            "nes memory inspector",
+            SdlMemoryDisplay::WIDTH * 2,
+            SdlMemoryDisplay::HEIGHT * 2,
+        )
+        .position(0, 720)
+        .build()
+        .unwrap();
+    let memory_window_id = memory_window.id();
+    let memory_canvas = memory_window.into_canvas().build().unwrap();
+
     let mut display = SdlDisplay::new(display_canvas);
     let mut debug_display = SdlDebugDisplay::new(debug_canvas);
+    let mut memory_display = SdlMemoryDisplay::new(memory_canvas);
     let mut ppu_debug_display = SdlPpuDebugDisplay::new(ppu_debug_canvas);
     let input = SdlInput::new();
     let mut nes = Nes::new(game_file, display.clone(), input).expect("Could not start the game");
 
     let mut state = EmulatorState {
-        running: true,
+        running: false,
         exit: false,
         one_step: false,
         stop_on_program_counter: None,
     };
 
     display.actual_display();
-    debug_display.display(&nes);
+    debug_display.update(&nes);
+    debug_display.show(&nes);
+    memory_display.update(&nes);
+    memory_display.show(&nes);
     ppu_debug_display.display(&nes);
 
     let mut i = 0;
@@ -1124,6 +1316,8 @@ fn main() {
         for event in event_pump.poll_iter() {
             if event.get_window_id() == Some(display_window_id) {
                 display.handle_event(event, &nes, &mut state);
+            } else if event.get_window_id() == Some(memory_window_id) {
+                memory_display.handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(debug_window_id) {
                 debug_display.handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(ppu_debug_window_id) {
@@ -1139,17 +1333,23 @@ fn main() {
             nes.run_one_cpu_instruction();
             state.one_step = false;
         } else if state.running {
-            nes.run_one_cpu_instruction();
-            if debug_display
-                .breakpoints
-                .contains(&nes.cpu.borrow().program_counter)
-            {
-                state.running = false;
+            for _ in 0..357954 {
+                nes.run_one_cpu_instruction();
+                debug_display.update(&nes);
+                memory_display.update(&nes);
+                if debug_display
+                    .breakpoints
+                    .contains(&nes.cpu.borrow().program_counter)
+                {
+                    state.running = false;
+                    break;
+                }
             }
         }
 
         display.actual_display();
-        debug_display.display(&nes);
+        debug_display.show(&nes);
+        memory_display.show(&nes);
         ppu_debug_display.display(&nes);
 
         // 60fps
@@ -1161,10 +1361,10 @@ fn main() {
             }
         }
 
-        i += 1;
-        if i > 200 {
-            break;
-        }
+        // i += 1;
+        // if i > 200 {
+        //     break;
+        // }
     }
 }
 

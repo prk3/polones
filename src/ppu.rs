@@ -206,7 +206,7 @@ impl Ppu {
                 self.vblank = false;
                 self.scroll_latch = false;
                 self.ppu_address_latch = false;
-                dbg!(result)
+                result
             }
             0x2007 => {
                 let result = nes.ppu_bus_read(self.ppu_address);

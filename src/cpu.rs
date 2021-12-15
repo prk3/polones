@@ -130,7 +130,6 @@ impl Cpu {
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_address = ((high as u16) << 8) | (low as u16);
-        println!("{:04x}", self.operand_address);
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 

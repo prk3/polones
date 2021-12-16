@@ -299,13 +299,13 @@ impl Display for SdlDisplay {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum InstructionTableValue {
+enum DisassemblyValue {
     Opcode(Operation, AddressingMode),
     Value(u8),
     Unknown,
 }
 
-impl InstructionTableValue {
+impl DisassemblyValue {
     fn unwrap_value(self) -> u8 {
         match self {
             Self::Opcode(_, _) => panic!("Tried unwrapping opcode"),
@@ -452,7 +452,7 @@ struct SdlDebugDisplay {
     breakpoint_address: u16,
     breakpoint_pos: i8,
     breakpoints: Vec<u16>,
-    disassembly: [InstructionTableValue; 1 << 16],
+    disassembly: [DisassemblyValue; 1 << 16],
 }
 
 impl SdlDebugDisplay {
@@ -513,7 +513,7 @@ impl SdlDebugDisplay {
             breakpoint_pos: 0,
             breakpoints,
             text_area: TextArea::new(),
-            disassembly: [InstructionTableValue::Unknown; 1 << 16],
+            disassembly: [DisassemblyValue::Unknown; 1 << 16],
         }
     }
 
@@ -552,8 +552,7 @@ impl SdlDebugDisplay {
 
         ta.write_u16_with_color(address, line, col + 2, color);
         ta.write_str_with_color(
-            // SAFE: operation strings are always 3 ASCII characters
-            unsafe { str::from_utf8_unchecked(&operation_str_buffer[..]) },
+            str::from_utf8(&operation_str_buffer[..]).unwrap(),
             line,
             col + 7,
             operation.color(),
@@ -646,19 +645,20 @@ impl SdlDebugDisplay {
 
         for _ in 0..16 {
             match self.disassembly[position as usize] {
-                InstructionTableValue::Opcode(..) => {
-                    if let InstructionTableValue::Value(..) = self.disassembly[(position as usize).wrapping_add(1)] {
+                DisassemblyValue::Opcode(..) => {
+                    position += 1;
+                    if let DisassemblyValue::Value(..) = self.disassembly[position as usize] {
                         position += 1;
-                    }
-                    if let InstructionTableValue::Value(..) = self.disassembly[(position as usize).wrapping_add(1)] {
-                        position += 1;
+                        if let DisassemblyValue::Value(..) = self.disassembly[position as usize] {
+                            position += 1;
+                        }
                     }
                 }
-                InstructionTableValue::Value(..) => {
+                DisassemblyValue::Value(..) => {
                     // program counter points to data, bad
                     break;
                 }
-                InstructionTableValue::Unknown => {
+                DisassemblyValue::Unknown => {
                     let opcode = nes.cpu_bus_read(position);
                     let (operation, mode) = Self::DISASSEMBLY_TABLE[opcode as usize];
 
@@ -666,7 +666,8 @@ impl SdlDebugDisplay {
                         break;
                     }
 
-                    self.disassembly[position as usize] = InstructionTableValue::Opcode(operation, mode);
+                    self.disassembly[position as usize] = DisassemblyValue::Opcode(operation, mode);
+
                     use AddressingMode::*;
                     match mode {
                         Accumulator | Implied => {
@@ -675,14 +676,14 @@ impl SdlDebugDisplay {
                         Immediate | XIndexedIndirect | IndirectYIndexed | Relative | Zeropage
                         | ZeropageXIndexed | ZeropageYIndexed => {
                             self.disassembly[(position + 1) as usize] =
-                                InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
+                                DisassemblyValue::Value(nes.cpu_bus_read(position + 1));
                             position += 2;
                         }
                         Absolute | AbsoluteXIndexed | AbsoluteYIndexed | Indirect => {
                             self.disassembly[(position + 1) as usize] =
-                                InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
+                                DisassemblyValue::Value(nes.cpu_bus_read(position + 1));
                             self.disassembly[(position + 2) as usize] =
-                                InstructionTableValue::Value(nes.cpu_bus_read(position + 2));
+                                DisassemblyValue::Value(nes.cpu_bus_read(position + 2));
                             position += 3;
                         }
                     }
@@ -728,13 +729,13 @@ impl SdlDebugDisplay {
                         for _ in 0..3 {
                             address += 1;
                             match self.disassembly[address as usize] {
-                                InstructionTableValue::Opcode(..) => {
+                                DisassemblyValue::Opcode(..) => {
                                     self.breakpoint_address = address;
                                     self.breakpoint_pos += 1;
                                     break;
                                 }
-                                InstructionTableValue::Value(..) => continue,
-                                InstructionTableValue::Unknown => break,
+                                DisassemblyValue::Value(..) => continue,
+                                DisassemblyValue::Unknown => break,
                             }
                         }
                     }
@@ -748,13 +749,13 @@ impl SdlDebugDisplay {
                         for _ in 0..3 {
                             address -= 1;
                             match self.disassembly[address as usize] {
-                                InstructionTableValue::Opcode(..) => {
+                                DisassemblyValue::Opcode(..) => {
                                     self.breakpoint_address = address;
                                     self.breakpoint_pos -= 1;
                                     break;
                                 }
-                                InstructionTableValue::Value(..) => continue,
-                                InstructionTableValue::Unknown => break,
+                                DisassemblyValue::Value(..) => continue,
+                                DisassemblyValue::Unknown => break,
                             }
                         }
                     }
@@ -778,7 +779,7 @@ impl SdlDebugDisplay {
                 } => {
                     let pc = nes.cpu.borrow().program_counter;
                     match self.disassembly[pc as usize] {
-                        InstructionTableValue::Opcode(..) => {
+                        DisassemblyValue::Opcode(..) => {
                             self.breakpoint_address = pc;
                             self.breakpoint_pos = 0;
                             self.breakpoint_mode = true;
@@ -863,18 +864,24 @@ impl SdlDebugDisplay {
         let mut line = 14;
 
         loop {
-            if let InstructionTableValue::Opcode(_, _) = self.disassembly[address as usize] {
-                let effective_color = if address == cpu.program_counter {
-                    Yellow
-                } else {
-                    color
-                };
-                self.write_instruction_from_disassembly(address, line, 11, effective_color);
-                color = White;
-                if line == 0 {
+            match self.disassembly[address as usize] {
+                DisassemblyValue::Opcode(..) => {
+                    let effective_color = if address == cpu.program_counter {
+                        Yellow
+                    } else {
+                        color
+                    };
+                    self.write_instruction_from_disassembly(address, line, 11, effective_color);
+                    color = White;
+                    if line == 0 {
+                        break;
+                    }
+                    line -= 1;
+                }
+                DisassemblyValue::Value(..) => {}
+                DisassemblyValue::Unknown => {
                     break;
                 }
-                line -= 1;
             }
             if address == 0 {
                 break;
@@ -883,21 +890,22 @@ impl SdlDebugDisplay {
         }
 
         if cpu.program_counter < u16::MAX {
-            let mut address = cpu.program_counter + 1;
             let mut line = 15;
 
-            loop {
-                if let InstructionTableValue::Opcode(_, _) = self.disassembly[address as usize] {
-                    self.write_instruction_from_disassembly(address, line, 11, White);
-                    if line == 31 {
+            for address in (cpu.program_counter + 1)..=u16::MAX {
+                match self.disassembly[address as usize] {
+                    DisassemblyValue::Opcode(..) => {
+                        self.write_instruction_from_disassembly(address, line, 11, White);
+                        if line == 31 {
+                            break;
+                        }
+                        line += 1;
+                    }
+                    DisassemblyValue::Value(..) => {}
+                    DisassemblyValue::Unknown => {
                         break;
                     }
-                    line += 1;
                 }
-                if address == u16::MAX {
-                    break;
-                }
-                address += 1;
             }
         }
 
@@ -967,10 +975,6 @@ impl SdlMemoryDisplay {
             .unwrap();
         canvas.clear();
         canvas.present();
-
-        let breakpoints = std::fs::read_to_string("./breakpoints")
-            .map(|s| deserialize_breakpoints(s))
-            .unwrap_or(Vec::new());
 
         Self {
             canvas,
@@ -1045,10 +1049,7 @@ impl SdlMemoryDisplay {
     }
 
     fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
-        let page_ranges = [
-            0x00..=0x19,
-            0x80..=0xFF,
-        ];
+        let page_ranges = [0x00..=0x19, 0x80..=0xFF];
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
@@ -1070,7 +1071,7 @@ impl SdlMemoryDisplay {
                 ..
             } => {
                 self.page = decrease_in_ranges(&page_ranges, self.page);
-            },
+            }
             _ => {}
         }
     }

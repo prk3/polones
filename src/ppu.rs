@@ -1,4 +1,3 @@
-use crate::mapper::Mapper;
 use crate::nes::{Frame, Nes};
 
 pub static PALLETTE: [(u8, u8, u8); 64] = [
@@ -150,6 +149,7 @@ pub struct Ppu {
     pub vertical_scroll: u8,
     pub vertical_scroll_next_frame: u8,
     pub buffer: Box<Frame>,
+    pub oam: [u8; 256],
 }
 
 impl Ppu {
@@ -170,6 +170,7 @@ impl Ppu {
             oam_address: 0,
             vertical_scroll_next_frame: 0, // changes to vertical scroll don't affect the current frame
             buffer: Box::new([[(0, 0, 0); 256]; 240]),
+            oam: [0; 256],
         }
     }
 
@@ -196,18 +197,19 @@ impl Ppu {
     }
 
     pub fn cpu_read(&mut self, nes: &Nes, address: u16) -> u8 {
-        match address {
+        match 0x2000 + (address & 0x0003) {
             0x2002 => {
                 let vblank = self.vblank;
                 let sprite_hit = false; // TODO
                 let sprite_overflow = false; // TODO
                 let result =
                     (vblank as u8) << 7 | (sprite_hit as u8) << 6 | (sprite_overflow as u8) << 5;
-                self.vblank = false;
+                self.status_register.set_vblank_flag(false);
                 self.scroll_latch = false;
                 self.ppu_address_latch = false;
                 result
             }
+            0x2004 => self.oam[self.oam_address as usize],
             0x2007 => {
                 let result = nes.ppu_bus_read(self.ppu_address);
                 self.ppu_address = (self.ppu_address
@@ -223,12 +225,21 @@ impl Ppu {
     }
 
     pub fn cpu_write(&mut self, nes: &Nes, address: u16, value: u8) {
-        match address {
-            0x2000 => self.control_register = ControlRegister(value),
+        match 0x2000 + (address & 0x0003) {
+            0x2000 => {
+                let old_control_register = self.control_register;
+                self.control_register = ControlRegister(value);
+                // if !old_control_register.get_nmi_enable() && self.control_register.get_nmi_enable() && self.vblank && self.status_register.get_vblank_flag() {
+                //     trigger NMI early
+                // }
+            }
             0x2001 => self.mask_register = MaskRegister(value),
             0x2003 => {
-                // if self.oam_address
                 self.oam_address = value;
+            }
+            0x2004 => {
+                self.oam[self.oam_address as usize] = value;
+                self.oam_address = self.oam_address.wrapping_add(1);
             }
             0x2005 => {
                 if !self.scroll_latch {
@@ -240,8 +251,8 @@ impl Ppu {
             }
             0x2006 => {
                 if !self.ppu_address_latch {
-                    self.ppu_address = ((self.ppu_address & 0x00FF) | (value as u16) << 8)
-                        & 0b0011_1111_1111_1111;
+                    self.ppu_address =
+                        ((self.ppu_address & 0x00FF) | (value as u16) << 8) & 0b0011_1111_1111_1111;
                     self.ppu_address_latch = true;
                 } else {
                     self.ppu_address =
@@ -254,7 +265,7 @@ impl Ppu {
                     + (1 << (self.control_register.get_increment_mode() as u8 * 5)))
                     & 0b0011_1111_1111_1111;
             }
-            other => eprintln!("Write to PPU at illegal address {:04x}", other)
+            other => eprintln!("Write to PPU at illegal address {:04x}", other),
         }
     }
 }

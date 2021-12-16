@@ -76,7 +76,7 @@ impl Nes {
     pub fn cpu_bus_read(&self, address: u16) -> u8 {
         match address {
             0x0000..=0x1FFF => self.cpu_ram.borrow_mut().read(address),
-            0x2000..=0x2007 => self.ppu.borrow_mut().cpu_read(self, address),
+            0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_read(self, address),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
                 self.mapper.borrow_mut().cpu_read(address)
             }
@@ -90,7 +90,7 @@ impl Nes {
     pub fn cpu_bus_write(&self, address: u16, value: u8) {
         match address {
             0x0000..=0x1FFF => self.cpu_ram.borrow_mut().write(address, value),
-            0x2000..=0x2007 => self.ppu.borrow_mut().cpu_write(self, address, value),
+            0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_write(self, address, value),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
                 self.mapper.borrow_mut().cpu_write(address, value)
             }

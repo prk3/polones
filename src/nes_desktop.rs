@@ -10,6 +10,7 @@ use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
 use std::cell::RefCell;
 use std::fmt::Write;
+use std::ops::RangeInclusive;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -642,42 +643,51 @@ impl SdlDebugDisplay {
     fn fill_instructions(&mut self, nes: &Nes) {
         let cpu = nes.cpu.borrow();
         let mut position = cpu.program_counter;
-        let mut checked_count = 0;
 
-        loop {
-            // while let InstructionTableValue::Unknown = self.disassembly[position as usize] {
-            if checked_count == 16 {
-                break;
-            }
-            let opcode = nes.cpu_bus_read(position);
-            let (operation, mode) = Self::DISASSEMBLY_TABLE[opcode as usize];
-
-            if operation == Operation::XXX {
-                break;
-            }
-
-            self.disassembly[position as usize] = InstructionTableValue::Opcode(operation, mode);
-            use AddressingMode::*;
-            match mode {
-                Accumulator | Implied => {
-                    position += 1;
+        for _ in 0..16 {
+            match self.disassembly[position as usize] {
+                InstructionTableValue::Opcode(..) => {
+                    if let InstructionTableValue::Value(..) = self.disassembly[(position as usize).wrapping_add(1)] {
+                        position += 1;
+                    }
+                    if let InstructionTableValue::Value(..) = self.disassembly[(position as usize).wrapping_add(1)] {
+                        position += 1;
+                    }
                 }
-                Immediate | XIndexedIndirect | IndirectYIndexed | Relative | Zeropage
-                | ZeropageXIndexed | ZeropageYIndexed => {
-                    self.disassembly[(position + 1) as usize] =
-                        InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
-                    position += 2;
+                InstructionTableValue::Value(..) => {
+                    // program counter points to data, bad
+                    break;
                 }
-                Absolute | AbsoluteXIndexed | AbsoluteYIndexed | Indirect => {
-                    self.disassembly[(position + 1) as usize] =
-                        InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
-                    self.disassembly[(position + 2) as usize] =
-                        InstructionTableValue::Value(nes.cpu_bus_read(position + 2));
-                    position += 3;
+                InstructionTableValue::Unknown => {
+                    let opcode = nes.cpu_bus_read(position);
+                    let (operation, mode) = Self::DISASSEMBLY_TABLE[opcode as usize];
+
+                    if operation == Operation::XXX {
+                        break;
+                    }
+
+                    self.disassembly[position as usize] = InstructionTableValue::Opcode(operation, mode);
+                    use AddressingMode::*;
+                    match mode {
+                        Accumulator | Implied => {
+                            position += 1;
+                        }
+                        Immediate | XIndexedIndirect | IndirectYIndexed | Relative | Zeropage
+                        | ZeropageXIndexed | ZeropageYIndexed => {
+                            self.disassembly[(position + 1) as usize] =
+                                InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
+                            position += 2;
+                        }
+                        Absolute | AbsoluteXIndexed | AbsoluteYIndexed | Indirect => {
+                            self.disassembly[(position + 1) as usize] =
+                                InstructionTableValue::Value(nes.cpu_bus_read(position + 1));
+                            self.disassembly[(position + 2) as usize] =
+                                InstructionTableValue::Value(nes.cpu_bus_read(position + 2));
+                            position += 3;
+                        }
+                    }
                 }
             }
-
-            checked_count += 1;
         }
     }
 
@@ -1035,32 +1045,65 @@ impl SdlMemoryDisplay {
     }
 
     fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
+        let page_ranges = [
+            0x00..=0x19,
+            0x80..=0xFF,
+        ];
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::Escape), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Escape),
+                ..
+            } => {
                 state.exit = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::Up), .. } => {
-                match self.page {
-                    0x00..=0x1F => {
-                        self.page += 1;
-                    }
-                    _ => {}
-                }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Up),
+                ..
+            } => {
+                self.page = increase_in_ranges(&page_ranges, self.page);
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::Down), .. } => {
-                match self.page {
-                    0x01..=0x20 => {
-                        self.page -= 1;
-                    }
-                    _ => {}
-                }
-            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Down),
+                ..
+            } => {
+                self.page = decrease_in_ranges(&page_ranges, self.page);
+            },
             _ => {}
         }
     }
+}
+
+fn decrease_in_ranges(ranges: &[RangeInclusive<u8>], value: u8) -> u8 {
+    for i in 0..ranges.len() {
+        if ranges[i].contains(&value) {
+            return if value > *ranges[i].start() {
+                value - 1
+            } else if i > 0 {
+                *ranges[i - 1].end()
+            } else {
+                value
+            };
+        }
+    }
+    value
+}
+
+fn increase_in_ranges(ranges: &[RangeInclusive<u8>], value: u8) -> u8 {
+    for i in 0..ranges.len() {
+        if ranges[i].contains(&value) {
+            return if value < *ranges[i].end() {
+                value + 1
+            } else if i < ranges.len() - 1 {
+                *ranges[i + 1].start()
+            } else {
+                value
+            };
+        }
+    }
+    value
 }
 
 struct SdlPpuDebugDisplay {
@@ -1331,6 +1374,8 @@ fn main() {
 
         if !state.running && state.one_step {
             nes.run_one_cpu_instruction();
+            debug_display.update(&nes);
+            memory_display.update(&nes);
             state.one_step = false;
         } else if state.running {
             for _ in 0..357954 {
@@ -1362,7 +1407,7 @@ fn main() {
         }
 
         // i += 1;
-        // if i > 200 {
+        // if i > 50 {
         //     break;
         // }
     }

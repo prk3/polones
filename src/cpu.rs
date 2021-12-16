@@ -129,6 +129,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
+        self.operand_accumulator = false;
         self.operand_address = ((high as u16) << 8) | (low as u16);
         self.program_counter = self.program_counter.wrapping_add(3);
     }
@@ -137,6 +138,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
+        self.operand_accumulator = false;
         self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.x_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
@@ -150,6 +152,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
+        self.operand_accumulator = false;
         self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.y_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
@@ -160,12 +163,14 @@ impl Cpu {
     }
 
     fn address_mode_immediate(&mut self, nes: &Nes) {
+        self.operand_accumulator = false;
         self.operand_address = self.program_counter.wrapping_add(1);
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
     fn address_mode_implied(&mut self, nes: &Nes) {
+        self.operand_accumulator = true;
         self.program_counter = self.program_counter.wrapping_add(1);
     }
 
@@ -178,6 +183,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(ptr);
         let high = nes.cpu_bus_read(ptr.wrapping_add(1));
 
+        self.operand_accumulator = false;
         self.operand_address = ((high as u16) << 8) | (low as u16);
         self.program_counter = self.program_counter.wrapping_add(3);
     }
@@ -190,6 +196,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(ptr);
         let high = nes.cpu_bus_read((ptr + 1) & 0x00FF);
 
+        self.operand_accumulator = false;
         self.operand_address = ((high as u16) << 8) | (low as u16);
         self.program_counter = self.program_counter.wrapping_add(2);
     }
@@ -202,6 +209,7 @@ impl Cpu {
         let low = nes.cpu_bus_read(ptr);
         let high = nes.cpu_bus_read((ptr + 1) & 0x00FF);
 
+        self.operand_accumulator = false;
         self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
@@ -212,14 +220,15 @@ impl Cpu {
     }
 
     fn address_mode_relative(&mut self, nes: &Nes) {
+        self.operand_accumulator = false;
         self.program_counter_offset = u8_to_i8(nes.cpu_bus_read(self.program_counter.wrapping_add(1)));
-
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
     fn address_mode_zeropage(&mut self, nes: &Nes) {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
+        self.operand_accumulator = false;
         self.operand_address = low as u16;
 
         self.program_counter = self.program_counter.wrapping_add(2);
@@ -228,6 +237,7 @@ impl Cpu {
     fn address_mode_zeropage_x_indexed(&mut self, nes: &Nes) {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
+        self.operand_accumulator = false;
         self.operand_address = low.wrapping_add(self.x_index) as u16;
 
         self.program_counter = self.program_counter.wrapping_add(2);
@@ -236,6 +246,7 @@ impl Cpu {
     fn address_mode_zeropage_y_indexed(&mut self, nes: &Nes) {
         let low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
 
+        self.operand_accumulator = false;
         self.operand_address = low.wrapping_add(self.y_index) as u16;
 
         self.program_counter = self.program_counter.wrapping_add(2);
@@ -497,11 +508,11 @@ impl Cpu {
     // LSR
     fn logical_shift_right(&mut self, nes: &Nes) {
         let mut operand_byte = self.get_operand_byte(nes);
-        let leftmost_bit = operand_byte & 1;
+        let rightmost_bit = operand_byte & 1;
         operand_byte = operand_byte >> 1;
         self.status_register.set_negative(false);
         self.status_register.set_zero(operand_byte == 0);
-        self.status_register.set_carry(leftmost_bit > 0);
+        self.status_register.set_carry(rightmost_bit > 0);
         self.set_operand_byte(nes, operand_byte);
     }
 
@@ -575,16 +586,16 @@ impl Cpu {
         self.status_register = StatusRegister(nes.cpu_bus_read(self.stack_pointer as u16));
         self.status_register.set_break(false);
         self.status_register.set_ignored(false);
-        let high = nes.cpu_bus_read(self.stack_pointer.wrapping_add(1) as u16);
-        let low = nes.cpu_bus_read(self.stack_pointer.wrapping_add(2) as u16);
+        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
+        let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(2) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(3);
         self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
     // RTS
     fn return_from_subroutine(&mut self, nes: &Nes) {
-        let high = nes.cpu_bus_read(self.stack_pointer as u16);
-        let low = nes.cpu_bus_read(self.stack_pointer.wrapping_add(1) as u16);
+        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
+        let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(2);
         self.program_counter = (((high as u16) << 8) | (low as u16)).wrapping_add(1);
     }

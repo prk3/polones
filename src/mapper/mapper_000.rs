@@ -57,10 +57,10 @@ impl Mapper for Mapper000 {
     }
 
     fn ppu_read(&mut self, address: u16) -> u8 {
-        todo!()
+        todo!("mapper ppu read at {:04X} not implemented", address)
     }
 
     fn ppu_write(&mut self, address: u16, byte: u8) {
-        todo!()
+        todo!("mapper ppu write at {:04X} not implemented", address)
     }
 }

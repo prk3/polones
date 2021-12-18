@@ -177,6 +177,10 @@ impl Ppu {
     pub fn tick(&mut self, nes: &Nes) {
         if self.scanline == 241 && self.pixel == 1 {
             self.vblank = true;
+            self.status_register.set_vblank_flag(true);
+            if self.control_register.get_nmi_enable() {
+                nes.cpu.borrow_mut().nmi();
+            }
         }
         if self.scanline == 261 && self.pixel == 1 {
             self.vblank = false;
@@ -197,7 +201,7 @@ impl Ppu {
     }
 
     pub fn cpu_read(&mut self, nes: &Nes, address: u16) -> u8 {
-        match 0x2000 + (address & 0x0003) {
+        match 0x2000 + (address & 0x0007) {
             0x2002 => {
                 let vblank = self.vblank;
                 let sprite_hit = false; // TODO
@@ -225,7 +229,7 @@ impl Ppu {
     }
 
     pub fn cpu_write(&mut self, nes: &Nes, address: u16, value: u8) {
-        match 0x2000 + (address & 0x0003) {
+        match 0x2000 + (address & 0x0007) {
             0x2000 => {
                 let old_control_register = self.control_register;
                 self.control_register = ControlRegister(value);

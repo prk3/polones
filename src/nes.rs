@@ -81,8 +81,7 @@ impl Nes {
                 self.mapper.borrow_mut().cpu_read(address)
             }
             _ => {
-                eprintln!("reading from unmapped address on cpu bus: {:04x}", address);
-                eprintln!("returning 0");
+                eprintln!("reading from unmapped address on cpu bus: {:04x}, returning 0.", address);
                 0
             }
         }
@@ -95,8 +94,7 @@ impl Nes {
                 self.mapper.borrow_mut().cpu_write(address, value)
             }
             _ => {
-                eprintln!("writing to unmapped address on cpu bus: {:04x}", address);
-                eprintln!("ignoring");
+                eprintln!("writing to unmapped address on cpu bus: {:04x}. Ignoring.", address);
             }
         }
     }
@@ -112,17 +110,28 @@ impl Nes {
         }
     }
     pub fn ppu_bus_write(&self, address: u16, value: u8) {
-
+        match address {
+            0x0000..=0x1FFF => self.mapper.borrow_mut().ppu_write(address, value),
+            0x2000..=0x3EFF => self.ppu_ram.borrow_mut().write(address, value),
+            0x3F00..=0x3FFF => todo!(),
+            _ => {
+                eprintln!("PPU write read out of bounds.");
+            }
+        }
+    }
+    pub fn run_one_cpu_tick(&mut self) {
+        self.cpu.borrow_mut().tick(&self);
+        self.ppu.borrow_mut().tick(&self);
+        self.ppu.borrow_mut().tick(&self);
+        self.ppu.borrow_mut().tick(&self);
     }
     pub fn run_one_cpu_instruction(&mut self) {
-        loop {
-            self.cpu.borrow_mut().tick(&self);
-            self.ppu.borrow_mut().tick(&self);
-            self.ppu.borrow_mut().tick(&self);
-            self.ppu.borrow_mut().tick(&self);
-            if self.cpu.borrow().finished_instruction() {
-                break;
-            }
+        while !self.cpu.borrow().finished_instruction() {
+            self.run_one_cpu_tick();
+        }
+        self.run_one_cpu_tick();
+        while !self.cpu.borrow().finished_instruction() {
+            self.run_one_cpu_tick();
         }
     }
 }

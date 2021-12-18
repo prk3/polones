@@ -8,6 +8,7 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::ops::RangeInclusive;
@@ -1002,17 +1003,6 @@ impl SdlMemoryDisplay {
             Yellow,
         );
 
-        for y in 0..16u8 {
-            for x in 0..16u8 {
-                self.text_area.write_u8_with_color(
-                    nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
-                    3 + y * 2,
-                    1 + x * 3,
-                    if x % 2 == 0 { White } else { Cyan },
-                );
-            }
-        }
-
         for row in 0..16u8 {
             self.text_area.write_char_with_color(
                 char::from_u32(if row < 10 {
@@ -1024,6 +1014,29 @@ impl SdlMemoryDisplay {
                 3 + row * 2,
                 0,
                 Yellow,
+            );
+        }
+
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                self.text_area.write_u8_with_color(
+                    nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                    3 + y * 2,
+                    1 + x * 3,
+                    if x % 2 == 0 { White } else { Cyan },
+                );
+            }
+        }
+
+        if start_address == 0x0100 {
+            let sp = nes.cpu.borrow().stack_pointer;
+            let y = sp >> 4;
+            let x = sp & 0x0F;
+            self.text_area.write_u8_with_color(
+                nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                3 + y * 2,
+                1 + x * 3,
+                Magenta,
             );
         }
 
@@ -1213,10 +1226,10 @@ impl SdlPpuDebugDisplay {
         ta.write_str_with_color("STATUS", 3, 18, Yellow);
 
         ta.write_str_with_color("VBLANK", 4, 18, Yellow);
-        ta.write_bool_with_color(ppu.mask_register.get_emphasize_blue(), 4, 25, White);
+        ta.write_bool_with_color(ppu.status_register.get_vblank_flag(), 4, 25, White);
 
         ta.write_str_with_color("S0H", 5, 21, Yellow);
-        ta.write_bool_with_color(ppu.mask_register.get_emphasize_green(), 5, 25, White);
+        ta.write_bool_with_color(ppu.status_register.get_hit_flag(), 5, 25, White);
 
         self.texture
             .with_lock(None, |data, _pitch| {
@@ -1289,7 +1302,7 @@ fn main() {
 
     let display_window = video_subsystem
         .window("nes display", SdlDisplay::WIDTH * 3, SdlDisplay::HEIGHT * 3)
-        .position(0, 1)
+        .position(0, 720)
         .build()
         .unwrap();
     let display_window_id = display_window.id();
@@ -1325,7 +1338,7 @@ fn main() {
             SdlMemoryDisplay::WIDTH * 2,
             SdlMemoryDisplay::HEIGHT * 2,
         )
-        .position(0, 720)
+        .position(0, 1)
         .build()
         .unwrap();
     let memory_window_id = memory_window.id();
@@ -1380,13 +1393,18 @@ fn main() {
             state.one_step = false;
         } else if state.running {
             for _ in 0..357954 {
-                nes.run_one_cpu_instruction();
+                nes.run_one_cpu_tick();
                 debug_display.update(&nes);
                 memory_display.update(&nes);
                 if debug_display
                     .breakpoints
                     .contains(&nes.cpu.borrow().program_counter)
                 {
+                    while !nes.cpu.borrow().finished_instruction() {
+                        nes.run_one_cpu_tick();
+                        debug_display.update(&nes);
+                        memory_display.update(&nes);
+                    }
                     state.running = false;
                     break;
                 }
@@ -1408,7 +1426,7 @@ fn main() {
         }
 
         // i += 1;
-        // if i > 50 {
+        // if i > 1 {
         //     break;
         // }
     }

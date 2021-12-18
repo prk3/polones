@@ -16,6 +16,12 @@ pub struct Cpu {
     operand_accumulator: bool, // whether the operand is accumulator
     crossed_page_boundary: bool, // whether sleep cycles might be increased by crossing the page boundary
     program_counter_offset: i8, // relative jump target (for branch instructions)
+
+    nmi_requested: bool,
+    irq_requested: bool,
+
+    nmi_sleep_cycles: u8,
+    irq_sleep_cycles: u8,
 }
 
 #[allow(non_snake_case)]
@@ -27,8 +33,13 @@ impl Cpu {
             x_index: 0,
             y_index: 0,
             program_counter: 0,
-            stack_pointer: 0,
-            status_register: StatusRegister::new(),
+            stack_pointer: 0xFD,
+            status_register: {
+                let mut s = StatusRegister::new();
+                s.set_interrupt(true);
+                s.set_ignored(true);
+                s
+            },
 
             opcode: 0,
             sleep_cycles: 0,
@@ -36,6 +47,12 @@ impl Cpu {
             operand_accumulator: false,
             crossed_page_boundary: false,
             program_counter_offset: 0,
+
+            nmi_requested: false,
+            irq_requested: false,
+
+            nmi_sleep_cycles: 0,
+            irq_sleep_cycles: 0,
         }
     }
     // thanks
@@ -63,19 +80,49 @@ impl Cpu {
 
     pub fn reset(&mut self, nes: &Nes) {
         let low = nes.cpu_bus_read(0xFFFC);
-        let high = nes.cpu_bus_read(0xFFFC + 1);
+        let high = nes.cpu_bus_read(0xFFFD);
         self.program_counter = ((high as u16) << 8) | low as u16;
         self.sleep_cycles = 8;
     }
 
-    pub fn mni(&mut self) {
-        todo!()
+    pub fn nmi(&mut self) {
+        self.nmi_requested = true;
+    }
+
+    pub fn irq(&mut self) {
+        if self.status_register.get_interrupt() {
+            self.irq_requested = true;
+        }
     }
 
     pub fn tick(&mut self, nes: &Nes) {
         if self.sleep_cycles > 0 {
             self.sleep_cycles -= 1;
             return
+        }
+
+        if self.nmi_sleep_cycles > 0 {
+            self.nmi_sleep_cycles -= 1;
+            return;
+        }
+
+        if self.irq_sleep_cycles > 0 {
+            self.irq_sleep_cycles -= 1;
+            return;
+        }
+
+        if self.nmi_requested {
+            self.nmi_requested = false;
+            self.nmi_sleep_cycles = 7;
+            self.run_nmi(nes);
+            return;
+        }
+
+        if self.irq_requested {
+            self.irq_requested = false;
+            self.irq_sleep_cycles = 7;
+            self.run_irq(nes);
+            return;
         }
 
         self.opcode = nes.cpu_bus_read(self.program_counter);
@@ -88,8 +135,42 @@ impl Cpu {
         Self::INSTRUCTION_SET[self.opcode as usize](self, nes);
     }
 
+    fn run_nmi(&mut self, nes: &Nes) {
+        let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
+        let low = self.program_counter.wrapping_add(2) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
+
+        let saved_status_register = self.status_register;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+
+        self.stack_pointer = self.stack_pointer.wrapping_sub(3);
+        self.status_register.set_interrupt(true);
+
+        let low = nes.cpu_bus_read(0xFFFA);
+        let high = nes.cpu_bus_read(0xFFFB);
+        self.program_counter = ((high as u16) << 8) | (low as u16);
+    }
+
+    fn run_irq(&mut self, nes: &Nes) {
+        let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
+        let low = self.program_counter.wrapping_add(2) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
+
+        let saved_status_register = self.status_register;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+
+        self.stack_pointer = self.stack_pointer.wrapping_sub(3);
+        self.status_register.set_interrupt(true);
+
+        let low = nes.cpu_bus_read(0xFFFE);
+        let high = nes.cpu_bus_read(0xFFFF);
+        self.program_counter = ((high as u16) << 8) | (low as u16);
+    }
+
     pub fn finished_instruction(&self) -> bool {
-        self.sleep_cycles == 0
+        self.sleep_cycles == 0 && self.nmi_sleep_cycles == 0 && self.irq_sleep_cycles == 0
     }
 
     fn get_operand_byte(&self, nes: &Nes) -> u8 {
@@ -345,16 +426,23 @@ impl Cpu {
 
     // BRK
     fn break_or_interrupt(&mut self, nes: &Nes) {
-        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
-        let low = self.program_counter.wrapping_add(2) as u8;
-        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, high);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, low);
+        // program counter has already been incremented to point to the next instruction
+        // we're saving PC+1 because the first byte after BRK instruction is the break reason
+        let high = (self.program_counter.wrapping_add(1) >> 8) as u8;
+        let low = self.program_counter.wrapping_add(1) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
 
-        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
-        let mut status_register = self.status_register;
-        status_register.set_ignored(true);
-        status_register.set_break(true);
+        let mut saved_status_register = self.status_register;
+        saved_status_register.set_break(true);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+
+        self.stack_pointer = self.stack_pointer.wrapping_sub(3);
+        self.status_register.set_interrupt(true);
+
+        let low = nes.cpu_bus_read(0xFFFE);
+        let high = nes.cpu_bus_read(0xFFFF);
+        self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
     // BVC
@@ -477,10 +565,10 @@ impl Cpu {
 
     // JSR
     fn jump_subroutine(&mut self, nes: &Nes) {
-        let program_counter_to_save = self.program_counter.wrapping_sub(1);
+        // program counter has already been incremented to point to the next instruction
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, self.program_counter as u8);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, (self.program_counter >> 8) as u8);
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, (program_counter_to_save >> 8) as u8);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_add(1) as u16, program_counter_to_save as u8);
         self.program_counter = self.operand_address;
     }
 
@@ -597,7 +685,7 @@ impl Cpu {
         let high = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(2);
-        self.program_counter = (((high as u16) << 8) | (low as u16)).wrapping_add(1);
+        self.program_counter = (((high as u16) << 8) | (low as u16));
     }
 
     // SBC

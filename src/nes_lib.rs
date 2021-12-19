@@ -1,7 +1,6 @@
 pub mod cpu;
-pub mod cpu_ram;
 pub mod game_file;
 pub mod mapper;
 pub mod nes;
 pub mod ppu;
-pub mod ppu_ram;
+pub mod ram;

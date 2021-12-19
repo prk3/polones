@@ -746,7 +746,7 @@ impl SdlDebugDisplay {
                     ..
                 } => {
                     let mut address = self.breakpoint_address;
-                    if self.breakpoint_pos > -10 {
+                    if self.breakpoint_pos > -14 {
                         for _ in 0..3 {
                             address -= 1;
                             match self.disassembly[address as usize] {
@@ -1040,6 +1040,18 @@ impl SdlMemoryDisplay {
             );
         }
 
+        if start_address == nes.cpu.borrow().program_counter & 0xFF00 {
+            let pc = nes.cpu.borrow().program_counter as u8;
+            let y = pc >> 4;
+            let x = pc & 0x0F;
+            self.text_area.write_u8_with_color(
+                nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                3 + y * 2,
+                1 + x * 3,
+                Red,
+            );
+        }
+
         self.texture
             .with_lock(None, |data, _pitch| {
                 self.text_area.draw_to_texture(data);
@@ -1162,6 +1174,12 @@ impl SdlPpuDebugDisplay {
         ta.write_str_with_color("PIXEL", 1, 3, Yellow);
         ta.write_u16_with_color(ppu.pixel, 1, 9, White);
 
+        ta.write_str_with_color("SCROLL", 0, 14, Yellow);
+        ta.write_str_with_color("H", 0, 21, Yellow);
+        ta.write_u8_with_color(ppu.horizontal_scroll, 0, 23, if ppu.scroll_latch { White } else { Magenta });
+        ta.write_str_with_color("V", 1, 21, Yellow);
+        ta.write_u8_with_color(ppu.vertical_scroll, 1, 23, if ppu.scroll_latch { Magenta } else { White });
+
         ta.write_str_with_color("CTRL", 3, 2, Yellow);
 
         ta.write_str_with_color("NMI", 4, 3, Yellow);
@@ -1230,6 +1248,13 @@ impl SdlPpuDebugDisplay {
 
         ta.write_str_with_color("S0H", 5, 21, Yellow);
         ta.write_bool_with_color(ppu.status_register.get_hit_flag(), 5, 25, White);
+
+        ta.write_str_with_color("OAM ADDR", 7, 18, Yellow);
+        ta.write_u8_with_color(ppu.oam_address, 7, 27, White);
+
+        ta.write_str_with_color("PPU ADDR", 8, 18, Yellow);
+        ta.write_u8_with_color((ppu.ppu_address >> 8) as u8, 8, 27, if ppu.ppu_address_latch { White } else { Magenta });
+        ta.write_u8_with_color(ppu.ppu_address as u8, 8, 29, if ppu.ppu_address_latch { Magenta } else { White });
 
         self.texture
             .with_lock(None, |data, _pitch| {

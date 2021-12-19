@@ -291,7 +291,7 @@ impl Cpu {
         let high = nes.cpu_bus_read((ptr + 1) & 0x00FF);
 
         self.operand_accumulator = false;
-        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
+        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;

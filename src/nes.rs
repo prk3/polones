@@ -32,6 +32,7 @@ pub struct Nes {
 
     pub cpu: RefCell<Cpu>,
     pub cpu_ram: RefCell<Ram<0x800>>,
+    pub oam_dma: RefCell<OamDma>,
 
     pub ppu: RefCell<Ppu>,
     pub ppu_nametable_ram: RefCell<Ram<0x800>>,
@@ -40,6 +41,26 @@ pub struct Nes {
     display: RefCell<Box<dyn Display>>,
     io: RefCell<Io>,
     pub input: RefCell<Box<dyn Input>>,
+}
+
+pub struct OamDma {
+    pub page: Option<u8>,
+}
+
+impl OamDma {
+    pub fn new() -> Self {
+        Self { page: None }
+    }
+    pub fn write(&mut self, value: u8) {
+        self.page = Some(value);
+    }
+    pub fn tick(&mut self, nes: &Nes) {
+        if let Some(page) = self.page {
+            println!("OAMDMA triggered from {:04X}", nes.cpu.borrow().program_counter);
+            nes.cpu.borrow_mut().dma(page);
+            self.page = None;
+        }
+    }
 }
 
 impl Nes {
@@ -51,6 +72,7 @@ impl Nes {
         let mapper = RefCell::new(mapper_from_game_file(game)?);
         let cpu = RefCell::new(Cpu::new());
         let cpu_ram = RefCell::new(Ram::new());
+        let oam_dma = RefCell::new(OamDma::new());
         let ppu = RefCell::new(Ppu::new());
         let ppu_nametable_ram = RefCell::new(Ram::new());
         let ppu_palette_ram = RefCell::new(Ram::new());
@@ -62,6 +84,7 @@ impl Nes {
             mapper,
             cpu,
             cpu_ram,
+            oam_dma,
             ppu,
             ppu_nametable_ram,
             ppu_palette_ram,
@@ -95,6 +118,7 @@ impl Nes {
         match address {
             0x0000..=0x1FFF => self.cpu_ram.borrow_mut().write(address, value),
             0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_write(self, address, value),
+            0x4014 => self.oam_dma.borrow_mut().write(value),
             0x4016..=0x4017 => self.io.borrow_mut().write(self, address, value),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
                 self.mapper.borrow_mut().cpu_write(address, value)
@@ -135,6 +159,7 @@ impl Nes {
     }
     pub fn run_one_cpu_tick(&mut self) {
         self.cpu.borrow_mut().tick(&self);
+        self.oam_dma.borrow_mut().tick(&self);
         self.ppu.borrow_mut().tick(&self);
         self.ppu.borrow_mut().tick(&self);
         self.ppu.borrow_mut().tick(&self);

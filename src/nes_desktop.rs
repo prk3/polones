@@ -953,7 +953,7 @@ struct SdlMemoryDisplay {
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
-    page: u8,
+    page: u16,
 }
 
 impl SdlMemoryDisplay {
@@ -989,12 +989,25 @@ impl SdlMemoryDisplay {
     fn update(&mut self, nes: &Nes) {}
 
     fn show(&mut self, nes: &Nes) {
-        let start_address = 256u16 * self.page as u16;
         let ta = &mut self.text_area;
+        ta.clear();
 
-        ta.write_str_with_color("START", 0, 0, Yellow);
-        ta.write_u16_with_color(start_address, 0, 6, White);
-        ta.write_str_with_color("< >", 0, 11, Yellow);
+        match self.page {
+            0x00..=0xFF => {
+                ta.write_str_with_color("CPU BUS", 0, 0, Yellow);
+                ta.write_u16_with_color(256 * self.page, 0, 8, White);
+            }
+            0x100..=0x13F => {
+                ta.write_str_with_color("PPU BUS", 0, 0, Yellow);
+                ta.write_u16_with_color(256 * (self.page - 0x100), 0, 8, White);
+            }
+            0x140 => {
+                ta.write_str_with_color("OAM", 0, 0, Yellow);
+            }
+            _ => unreachable!(),
+        }
+
+        ta.write_str_with_color("< >", 0, 13, Yellow);
 
         self.text_area.write_str_with_color(
             " 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F",
@@ -1020,7 +1033,18 @@ impl SdlMemoryDisplay {
         for y in 0..16u8 {
             for x in 0..16u8 {
                 self.text_area.write_u8_with_color(
-                    nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                    match self.page {
+                        0x00..=0xFF => {
+                            nes.cpu_bus_read((256 * self.page) + (y as u16 * 16) + x as u16)
+                        }
+                        0x100..=0x13F => {
+                            nes.ppu_bus_read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)
+                        }
+                        0x140 => {
+                            nes.ppu.borrow().oam[y as usize * 16 + x as usize]
+                        }
+                        _ => unreachable!(),
+                    },
                     3 + y * 2,
                     1 + x * 3,
                     if x % 2 == 0 { White } else { Cyan },
@@ -1028,27 +1052,39 @@ impl SdlMemoryDisplay {
             }
         }
 
-        if start_address == 0x0100 {
+        if self.page == 0x01 {
             let sp = nes.cpu.borrow().stack_pointer;
             let y = sp >> 4;
             let x = sp & 0x0F;
             self.text_area.write_u8_with_color(
-                nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                nes.cpu_bus_read(0x0100 + (y as u16 * 16) + x as u16),
                 3 + y * 2,
                 1 + x * 3,
                 Magenta,
             );
         }
 
-        if start_address == nes.cpu.borrow().program_counter & 0xFF00 {
-            let pc = nes.cpu.borrow().program_counter as u8;
-            let y = pc >> 4;
-            let x = pc & 0x0F;
+        if self.page == nes.cpu.borrow().program_counter & 0xFF00 {
+            let pc = nes.cpu.borrow().program_counter;
+            let y = pc as u8 >> 4;
+            let x = pc as u8 & 0x0F;
             self.text_area.write_u8_with_color(
-                nes.cpu_bus_read(start_address + (y as u16 * 16) + x as u16),
+                nes.cpu_bus_read(pc),
                 3 + y * 2,
                 1 + x * 3,
                 Red,
+            );
+        }
+
+        if self.page == 0x140 {
+            let address = nes.ppu.borrow().oam_address;
+            let y = address >> 4;
+            let x = address & 0x0F;
+            self.text_area.write_u8_with_color(
+                nes.ppu.borrow().oam[address as usize],
+                3 + y * 2,
+                1 + x * 3,
+                Magenta,
             );
         }
 
@@ -1074,7 +1110,7 @@ impl SdlMemoryDisplay {
     }
 
     fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
-        let page_ranges = [0x00..=0x19, 0x80..=0xFF];
+        let page_ranges = [0x00..=0x19, 0x80..=0x140];
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
@@ -1097,12 +1133,30 @@ impl SdlMemoryDisplay {
             } => {
                 self.page = decrease_in_ranges(&page_ranges, self.page);
             }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::C),
+                ..
+            } => {
+                self.page = 0x00;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::P),
+                ..
+            } => {
+                self.page = 0x100;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::O),
+                ..
+            } => {
+                self.page = 0x140;
+            }
             _ => {}
         }
     }
 }
 
-fn decrease_in_ranges(ranges: &[RangeInclusive<u8>], value: u8) -> u8 {
+fn decrease_in_ranges(ranges: &[RangeInclusive<u16>], value: u16) -> u16 {
     for i in 0..ranges.len() {
         if ranges[i].contains(&value) {
             return if value > *ranges[i].start() {
@@ -1117,7 +1171,7 @@ fn decrease_in_ranges(ranges: &[RangeInclusive<u8>], value: u8) -> u8 {
     value
 }
 
-fn increase_in_ranges(ranges: &[RangeInclusive<u8>], value: u8) -> u8 {
+fn increase_in_ranges(ranges: &[RangeInclusive<u16>], value: u16) -> u16 {
     for i in 0..ranges.len() {
         if ranges[i].contains(&value) {
             return if value < *ranges[i].end() {

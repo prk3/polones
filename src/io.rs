@@ -42,7 +42,7 @@ impl Io {
                 }
             }
             0x4017 => {
-                eprintln!("Write to 4017 ignored.");
+                eprintln!("IO: Write to 4017 ignored.");
             }
             _ => unreachable!(),
         }

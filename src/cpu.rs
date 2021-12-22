@@ -22,6 +22,11 @@ pub struct Cpu {
 
     nmi_sleep_cycles: u8,
     irq_sleep_cycles: u8,
+
+    dma_page: u8,
+    dma_byte: u8,
+    dma_cycles_left: u16,
+    cycle_odd: bool,
 }
 
 #[allow(non_snake_case)]
@@ -53,6 +58,11 @@ impl Cpu {
 
             nmi_sleep_cycles: 0,
             irq_sleep_cycles: 0,
+
+            dma_page: 0,
+            dma_byte: 0,
+            dma_cycles_left: 0,
+            cycle_odd: false,
         }
     }
     // thanks
@@ -95,7 +105,20 @@ impl Cpu {
         }
     }
 
+    pub fn dma(&mut self, page: u8) {
+        self.dma_page = page;
+        self.dma_byte = 0;
+        self.dma_cycles_left = 512 + 1 + !self.cycle_odd as u16;
+    }
+
     pub fn tick(&mut self, nes: &Nes) {
+        self.cycle_odd = !self.cycle_odd;
+
+        if self.dma_cycles_left > 0 {
+            self.run_dma(nes);
+            return;
+        }
+
         if self.sleep_cycles > 0 {
             self.sleep_cycles -= 1;
             return
@@ -169,8 +192,22 @@ impl Cpu {
         self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
+    pub fn run_dma(&mut self, nes: &Nes) {
+        if self.dma_cycles_left > 512 {
+            self.dma_cycles_left -= 1;
+            return;
+        }
+
+        if self.dma_cycles_left & 1 == 0 {
+            self.dma_byte = nes.cpu_bus_read(((self.dma_page as u16 + 1) << 8) - (self.dma_cycles_left >> 1));
+        } else {
+            nes.cpu_bus_write(0x2004, self.dma_byte);
+        }
+        self.dma_cycles_left -= 1;
+    }
+
     pub fn finished_instruction(&self) -> bool {
-        self.sleep_cycles == 0 && self.nmi_sleep_cycles == 0 && self.irq_sleep_cycles == 0
+        self.dma_cycles_left == 0 && self.sleep_cycles == 0 && self.nmi_sleep_cycles == 0 && self.irq_sleep_cycles == 0
     }
 
     fn get_operand_byte(&self, nes: &Nes) -> u8 {

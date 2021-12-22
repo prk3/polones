@@ -124,6 +124,40 @@ impl MaskRegister {
 #[repr(transparent)]
 pub struct StatusRegister(u8);
 
+pub struct Loopy(pub u16);
+
+impl Loopy {
+    pub fn new() -> Self {
+        Self(0)
+    }
+    pub fn get_coarse_x_scroll(&self) -> u8 {
+        self.0 as u8 & 0b11111
+    }
+    pub fn set_coarse_x_scroll(&mut self, new: u8) {
+        self.0 = (self.0 & 0b111_11_11111_00000) | (new as u16 & 0b11111);
+    }
+    pub fn get_coarse_y_scroll(&self) -> u8 {
+        (self.0 >> 5) as u8 & 0b11111
+    }
+    pub fn set_coarse_y_scroll(&mut self, new: u8) {
+        self.0 = (self.0 & 0b111_11_00000_11111) | ((new as u16 & 0b11111) << 5);
+    }
+    pub fn get_nametable_select(&self) -> u8 {
+        (self.0 >> 10) as u8 & 0b11
+    }
+    pub fn set_nametable_select(&mut self, new: u8) {
+        self.0 = (self.0 & 0b111_00_11111_11111) | (new as u16 & 0b11) << 10;
+    }
+    pub fn get_fine_y_scroll(&self) -> u8 {
+        (self.0 >> 12) as u8 & 0b111
+    }
+    pub fn set_fine_y_scroll(&mut self, new: u8) {
+        self.0 = (self.0 & 0b000_11_11111_11111) | (new as u16 & 0b111) << 12;
+    }
+}
+
+
+
 #[rustfmt::skip]
 impl StatusRegister {
     fn new() -> Self {
@@ -143,13 +177,19 @@ pub struct Ppu {
     pub vblank: bool,
     pub scroll_latch: bool,
     pub ppu_address: u16,
-    pub ppu_address_latch: bool,
     pub oam_address: u8,
     pub horizontal_scroll: u8,
     pub vertical_scroll: u8,
     pub vertical_scroll_next_frame: u8,
     pub buffer: Box<Frame>,
     pub oam: [u8; 256],
+
+    pub odd: bool,
+
+    pub v: Loopy,
+    pub t: Loopy,
+    pub x: u8,
+    pub w: bool,
 }
 
 impl Ppu {
@@ -166,11 +206,16 @@ impl Ppu {
             vblank: false,
             scroll_latch: false,
             ppu_address: 0,
-            ppu_address_latch: false,
             oam_address: 0,
             vertical_scroll_next_frame: 0, // changes to vertical scroll don't affect the current frame
             buffer: Box::new([[(0, 0, 0); 256]; 240]),
             oam: [0; 256],
+
+            odd: false,
+            v: Loopy::new(),
+            t: Loopy::new(),
+            x: 0,
+            w: false,
         }
     }
 
@@ -210,7 +255,7 @@ impl Ppu {
                     (vblank as u8) << 7 | (sprite_hit as u8) << 6 | (sprite_overflow as u8) << 5;
                 self.status_register.set_vblank_flag(false);
                 self.scroll_latch = false;
-                self.ppu_address_latch = false;
+                self.w = false;
                 result
             }
             0x2004 => self.oam[self.oam_address as usize],
@@ -233,6 +278,7 @@ impl Ppu {
             0x2000 => {
                 let old_control_register = self.control_register;
                 self.control_register = ControlRegister(value);
+                self.t.set_nametable_select(value & 0b11);
                 // if !old_control_register.get_nmi_enable() && self.control_register.get_nmi_enable() && self.vblank && self.status_register.get_vblank_flag() {
                 //     trigger NMI early
                 // }
@@ -246,22 +292,27 @@ impl Ppu {
                 self.oam_address = self.oam_address.wrapping_add(1);
             }
             0x2005 => {
-                if !self.scroll_latch {
-                    self.horizontal_scroll = value;
-                    self.scroll_latch = true;
+                if !self.w {
+                    self.t.set_coarse_x_scroll(value >> 3);
+                    self.x = value & 0b111;
                 } else {
-                    self.vertical_scroll_next_frame = value;
+                    self.t.set_coarse_y_scroll(value >> 3);
+                    self.t.set_fine_y_scroll(value);
                 }
+                self.w = !self.w;
             }
             0x2006 => {
-                if !self.ppu_address_latch {
+                if !self.w {
+                    self.t.0 = (self.t.0 & 0x00FF) | ((value as u16 & 0b00111111) << 8);
                     self.ppu_address =
                         ((self.ppu_address & 0x00FF) | (value as u16) << 8) & 0b0011_1111_1111_1111;
-                    self.ppu_address_latch = true;
                 } else {
+                    self.t.0 = (self.t.0 & 0xFF00) | (value as u16);
+                    self.v.0 = self.t.0;
                     self.ppu_address =
                         ((self.ppu_address & 0xFF00) | (value as u16)) & 0b0011_1111_1111_1111;
                 }
+                self.w = !self.w;
             }
             0x2007 => {
                 nes.ppu_bus_write(self.ppu_address, value);

@@ -9,8 +9,10 @@ pub trait Mapper {
     fn cpu_address_mapped(&self, address: u16) -> bool;
     fn cpu_read(&mut self, address: u16) -> u8;
     fn cpu_write(&mut self, address: u16, byte: u8);
+    fn ppu_address_mapped(&self, address: u16) -> bool;
     fn ppu_read(&mut self, address: u16) -> u8;
     fn ppu_write(&mut self, address: u16, byte: u8);
+    fn ppu_nametable_address_mapped(&self, address: u16) -> u16;
 }
 
 pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper>, &'static str> {

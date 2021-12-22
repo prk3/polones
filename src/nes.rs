@@ -1,5 +1,6 @@
 use crate::cpu::Cpu;
 use crate::game_file::GameFile;
+use crate::io::Io;
 use crate::mapper::{mapper_from_game_file, Mapper};
 use crate::ppu::Ppu;
 use crate::ram::Ram;
@@ -13,15 +14,10 @@ pub trait Display {
     fn display(&mut self, frame: Box<Frame>);
 }
 
-pub struct InputData {
-    pub pad1: Option<u8>,
-    pub pad2: Option<u8>,
-}
-
 /// Abstraction over input sources (pads).
 pub trait Input {
-    /// Returns the state of input devices.
-    fn read(&mut self) -> InputData;
+    fn read_pad_1(&mut self) -> Option<u8>;
+    fn read_pad_2(&mut self) -> Option<u8>;
 }
 
 /// Abstraction over audio interface.
@@ -35,14 +31,15 @@ pub struct Nes {
     pub mapper: RefCell<Box<dyn Mapper>>,
 
     pub cpu: RefCell<Cpu>,
-    pub cpu_ram: RefCell<Ram::<0x800>>,
+    pub cpu_ram: RefCell<Ram<0x800>>,
 
     pub ppu: RefCell<Ppu>,
     pub ppu_nametable_ram: RefCell<Ram<0x800>>,
     pub ppu_palette_ram: RefCell<Ram<0x20>>,
 
     display: RefCell<Box<dyn Display>>,
-    input: RefCell<Box<dyn Input>>,
+    io: RefCell<Io>,
+    pub input: RefCell<Box<dyn Input>>,
 }
 
 impl Nes {
@@ -58,6 +55,7 @@ impl Nes {
         let ppu_nametable_ram = RefCell::new(Ram::new());
         let ppu_palette_ram = RefCell::new(Ram::new());
         let display = RefCell::new(Box::new(display));
+        let io = RefCell::new(Io::new());
         let input = RefCell::new(Box::new(input));
 
         let nes = Self {
@@ -68,6 +66,7 @@ impl Nes {
             ppu_nametable_ram,
             ppu_palette_ram,
             display,
+            io,
             input,
         };
 
@@ -79,12 +78,13 @@ impl Nes {
         match address {
             0x0000..=0x1FFF => self.cpu_ram.borrow_mut().read(address),
             0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_read(self, address),
+            0x4016..=0x4017 => self.io.borrow_mut().read(self, address),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
                 self.mapper.borrow_mut().cpu_read(address)
             }
             _ => {
                 eprintln!(
-                    "reading from unmapped address on cpu bus: {:04x}, returning 0.",
+                    "Nes: CPU bus read from unmapped address {:04x}, returning 0.",
                     address
                 );
                 0
@@ -95,12 +95,13 @@ impl Nes {
         match address {
             0x0000..=0x1FFF => self.cpu_ram.borrow_mut().write(address, value),
             0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_write(self, address, value),
+            0x4016..=0x4017 => self.io.borrow_mut().write(self, address, value),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
                 self.mapper.borrow_mut().cpu_write(address, value)
             }
             _ => {
                 eprintln!(
-                    "writing to unmapped address on cpu bus: {:04x}. Ignoring.",
+                    "Nes: CPU bus write to unmapped address {:04x} ignored.",
                     address
                 );
             }
@@ -108,17 +109,27 @@ impl Nes {
     }
     pub fn ppu_bus_read(&self, address: u16) -> u8 {
         match address & 0x3FFF {
-            0x0000..=0x1FFF => self.mapper.borrow_mut().ppu_read(address),
-            0x2000..=0x3EFF => self.ppu_nametable_ram.borrow().read(address),
             0x3F00..=0x3FFF => self.ppu_palette_ram.borrow().read(address),
+            _a if self.mapper.borrow().ppu_address_mapped(address) => {
+                self.mapper.borrow_mut().ppu_read(address)
+            }
+            0x2000..=0x3EFF => self
+                .ppu_nametable_ram
+                .borrow()
+                .read(self.mapper.borrow().ppu_nametable_address_mapped(address)),
             _ => unreachable!(),
         }
     }
     pub fn ppu_bus_write(&self, address: u16, value: u8) {
         match address & 0x3FFF {
-            0x0000..=0x1FFF => self.mapper.borrow_mut().ppu_write(address, value),
-            0x2000..=0x3EFF => self.ppu_nametable_ram.borrow_mut().write(address, value),
             0x3F00..=0x3FFF => self.ppu_palette_ram.borrow_mut().write(address, value),
+            _a if self.mapper.borrow().ppu_address_mapped(address) => {
+                self.mapper.borrow_mut().ppu_write(address, value)
+            }
+            0x2000..=0x3EFF => self.ppu_nametable_ram.borrow_mut().write(
+                self.mapper.borrow().ppu_nametable_address_mapped(address),
+                value,
+            ),
             _ => unreachable!(),
         }
     }

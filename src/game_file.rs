@@ -3,6 +3,7 @@ pub struct GameFile {
     data: Vec<u8>,
     pub format: FileFormat,
     pub mapper: u16,
+    pub nametable_mirroring_vertical: bool,
     trainer: Option<(usize, usize)>,
     prg_rom: (usize, usize),
     chr_rom: (usize, usize),
@@ -43,7 +44,7 @@ impl GameFile {
         let hard_wired_four_screen_mode = data[6] & 0b1000 > 0;
         let trainer_present = data[6] & 0b0100 > 0;
         let battery_present = data[6] & 0b0010 > 0;
-        let hard_wired_nametable_mirroring_vertical = data[6] & 0b0001 > 0;
+        let nametable_mirroring_vertical = data[6] & 0b0001 > 0;
 
         let trainer = if trainer_present {
             let start = read;
@@ -203,6 +204,7 @@ impl GameFile {
             prg_rom,
             chr_rom,
             misc_rom,
+            nametable_mirroring_vertical,
         })
     }
 

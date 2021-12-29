@@ -521,8 +521,8 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(nes);
         let accumulator_minus_operand = self.accumulator.wrapping_sub(operand_byte);
         self.status_register.set_negative(accumulator_minus_operand & 0b10000000 > 0);
-        self.status_register.set_zero(accumulator_minus_operand == 0);
-        self.status_register.set_carry(accumulator_minus_operand > self.accumulator);
+        self.status_register.set_zero(self.accumulator == operand_byte);
+        self.status_register.set_carry(self.accumulator >= operand_byte);
     }
 
     // CPX
@@ -530,8 +530,8 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(nes);
         let x_minus_operand = self.x_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(x_minus_operand & 0b10000000 > 0);
-        self.status_register.set_zero(x_minus_operand == 0);
-        self.status_register.set_carry(x_minus_operand > self.x_index);
+        self.status_register.set_zero(self.x_index == operand_byte);
+        self.status_register.set_carry(self.accumulator >= operand_byte);
     }
 
     // CPY
@@ -539,8 +539,8 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(nes);
         let y_minus_operand = self.x_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(y_minus_operand & 0b10000000 > 0);
-        self.status_register.set_zero(y_minus_operand == 0);
-        self.status_register.set_carry(y_minus_operand > self.y_index);
+        self.status_register.set_zero(self.y_index == 0);
+        self.status_register.set_carry(self.y_index >= operand_byte);
     }
 
     // DEC
@@ -722,7 +722,7 @@ impl Cpu {
         let high = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(2);
-        self.program_counter = (((high as u16) << 8) | (low as u16));
+        self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
     // SBC

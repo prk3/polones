@@ -1,7 +1,7 @@
 use nes_lib::*;
 
 use nes_lib::game_file::GameFile;
-use nes_lib::nes::{Display, Frame, Input, Nes};
+use nes_lib::nes::{Display, Frame, Input, Nes, PortState};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -173,31 +173,39 @@ impl<const W: usize, const H: usize> TextArea<W, H> {
     }
 }
 
-#[derive(Clone)]
-struct SdlDisplay {
-    inner: Rc<RefCell<SdlDisplayInner>>,
-}
-
-struct SdlDisplayInner {
+struct SdlGameWindow {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
+    gamepad_1_up: bool,
+    gamepad_1_down: bool,
+    gamepad_1_left: bool,
+    gamepad_1_right: bool,
+    gamepad_1_select: bool,
+    gamepad_1_start: bool,
+    gamepad_1_a: bool,
+    gamepad_1_b: bool,
+    gamepad_2_up: bool,
+    gamepad_2_down: bool,
+    gamepad_2_left: bool,
+    gamepad_2_right: bool,
+    gamepad_2_select: bool,
+    gamepad_2_start: bool,
+    gamepad_2_a: bool,
+    gamepad_2_b: bool,
 }
 
-impl SdlDisplay {
-    const WIDTH: u32 = 256;
-    const HEIGHT: u32 = 240;
-
+impl SdlGameWindow {
     fn new(canvas: sdl2::render::WindowCanvas) -> Self {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         let texture_creator = Rc::new(canvas.texture_creator());
-        let mut data = [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
+        let mut data = [0; SdlDisplay::WIDTH as usize * SdlDisplay::HEIGHT as usize * 4];
         let surface = Surface::from_data(
             &mut data[..],
-            Self::WIDTH,
-            Self::HEIGHT,
-            Self::WIDTH * 4,
+            SdlDisplay::WIDTH,
+            SdlDisplay::HEIGHT,
+            SdlDisplay::WIDTH * 4,
             PixelFormatEnum::RGB24,
         )
         .unwrap();
@@ -206,18 +214,32 @@ impl SdlDisplay {
             .unwrap();
         canvas.clear();
         Self {
-            inner: Rc::new(RefCell::new(SdlDisplayInner {
-                canvas,
-                texture: unsafe { std::mem::transmute(texture) },
-                _texture_creator: texture_creator,
-            })),
+            canvas,
+            texture: unsafe { std::mem::transmute(texture) },
+            _texture_creator: texture_creator,
+            gamepad_1_up: false,
+            gamepad_1_down: false,
+            gamepad_1_left: false,
+            gamepad_1_right: false,
+            gamepad_1_select: false,
+            gamepad_1_start: false,
+            gamepad_1_a: false,
+            gamepad_1_b: false,
+            gamepad_2_up: false,
+            gamepad_2_down: false,
+            gamepad_2_left: false,
+            gamepad_2_right: false,
+            gamepad_2_select: false,
+            gamepad_2_start: false,
+            gamepad_2_a: false,
+            gamepad_2_b: false,
         }
     }
 
     fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
         match event {
             Event::KeyDown {
-                keycode: k @ Some(Keycode::Escape),
+                keycode: _k @ Some(Keycode::Escape),
                 ..
             } => {
                 state.exit = true;
@@ -225,14 +247,73 @@ impl SdlDisplay {
             Event::Quit { .. } => {
                 state.exit = true;
             }
+            Event::KeyDown { keycode: _k @ Some(Keycode::W), .. } => {
+                self.gamepad_1_up = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::S), .. } => {
+                self.gamepad_1_down = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::A), .. } => {
+                self.gamepad_1_left = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::D), .. } => {
+                self.gamepad_1_right = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::R), .. } => {
+                self.gamepad_1_select = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::T), .. } => {
+                self.gamepad_1_start = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::F), .. } => {
+                self.gamepad_1_b = true;
+            }
+            Event::KeyDown { keycode: _k @ Some(Keycode::G), .. } => {
+                self.gamepad_1_a = true;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::W), .. } => {
+                self.gamepad_1_up = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::S), .. } => {
+                self.gamepad_1_down = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::A), .. } => {
+                self.gamepad_1_left = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::D), .. } => {
+                self.gamepad_1_right = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::R), .. } => {
+                self.gamepad_1_select = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::T), .. } => {
+                self.gamepad_1_start = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::F), .. } => {
+                self.gamepad_1_b = false;
+            }
+            Event::KeyUp { keycode: _k @ Some(Keycode::G), .. } => {
+                self.gamepad_1_a = false;
+            }
             _ => {}
         }
     }
 
-    fn actual_display(&self) {
-        let mut inner = self.inner.borrow_mut();
+    fn actual_display(&mut self) {
+        self.canvas.present();
+    }
+}
 
-        inner.canvas.present();
+struct SdlDisplay {
+    inner: Rc<RefCell<SdlGameWindow>>,
+}
+
+impl SdlDisplay {
+    const WIDTH: u32 = 256;
+    const HEIGHT: u32 = 240;
+
+    fn new(inner: Rc<RefCell<SdlGameWindow>>) -> Self {
+        Self { inner }
     }
 }
 
@@ -290,12 +371,51 @@ impl Display for SdlDisplay {
 
         // TODO This deconstruction trick is smart as fuck, I have to write
         // a blog post about it.
-        let SdlDisplayInner {
+        let SdlGameWindow {
             canvas, texture, ..
         } = &mut *inner;
         canvas
             .copy(&texture, frame_rect, scaled_frame_rect)
             .unwrap();
+    }
+}
+
+struct SdlInput {
+    inner: Rc<RefCell<SdlGameWindow>>,
+}
+
+impl SdlInput {
+    pub fn new(inner: Rc<RefCell<SdlGameWindow>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Input for SdlInput {
+    fn read_port_1(&mut self) -> PortState {
+        let inner = self.inner.as_ref().borrow();
+        PortState::Gamepad {
+            up: inner.gamepad_1_up,
+            down: inner.gamepad_1_down,
+            left: inner.gamepad_1_left,
+            right: inner.gamepad_1_right,
+            select: inner.gamepad_1_select,
+            start: inner.gamepad_1_start,
+            a: inner.gamepad_1_a,
+            b: inner.gamepad_1_b,
+        }
+    }
+    fn read_port_2(&mut self) -> PortState {
+        let inner = self.inner.as_ref().borrow();
+        PortState::Gamepad {
+            up: inner.gamepad_2_up,
+            down: inner.gamepad_2_down,
+            left: inner.gamepad_2_left,
+            right: inner.gamepad_2_right,
+            select: inner.gamepad_2_select,
+            start: inner.gamepad_2_start,
+            a: inner.gamepad_2_a,
+            b: inner.gamepad_2_b,
+        }
     }
 }
 
@@ -1225,8 +1345,8 @@ impl SdlPpuDebugDisplay {
         ta.write_str_with_color("SCANLINE", 0, 0, Yellow);
         ta.write_u16_with_color(ppu.scanline, 0, 9, White);
 
-        ta.write_str_with_color("PIXEL", 1, 3, Yellow);
-        ta.write_u16_with_color(ppu.pixel, 1, 9, White);
+        ta.write_str_with_color("DOT", 1, 5, Yellow);
+        ta.write_u16_with_color(ppu.dot, 1, 9, White);
 
         ta.write_str_with_color("SCROLL", 0, 14, Yellow);
         ta.write_str_with_color("H", 0, 21, Yellow);
@@ -1347,23 +1467,6 @@ impl SdlPpuDebugDisplay {
     }
 }
 
-struct SdlInput {}
-
-impl SdlInput {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Input for SdlInput {
-    fn read_pad_1(&mut self) -> Option<u8> {
-        None
-    }
-    fn read_pad_2(&mut self) -> Option<u8> {
-        None
-    }
-}
-
 struct EmulatorState {
     running: bool,
     exit: bool,
@@ -1382,13 +1485,13 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
-    let display_window = video_subsystem
+    let game_window = video_subsystem
         .window("nes display", SdlDisplay::WIDTH * 3, SdlDisplay::HEIGHT * 3)
         .position(0, 720)
         .build()
         .unwrap();
-    let display_window_id = display_window.id();
-    let display_canvas = display_window.into_canvas().build().unwrap();
+    let game_window_id = game_window.id();
+    let game_canvas = game_window.into_canvas().build().unwrap();
 
     let debug_window = video_subsystem
         .window(
@@ -1426,12 +1529,13 @@ fn main() {
     let memory_window_id = memory_window.id();
     let memory_canvas = memory_window.into_canvas().build().unwrap();
 
-    let mut display = SdlDisplay::new(display_canvas);
+    let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
+    let display = SdlDisplay::new(game_window.clone());
+    let input = SdlInput::new(game_window.clone());
     let mut debug_display = SdlDebugDisplay::new(debug_canvas);
     let mut memory_display = SdlMemoryDisplay::new(memory_canvas);
     let mut ppu_debug_display = SdlPpuDebugDisplay::new(ppu_debug_canvas);
-    let input = SdlInput::new();
-    let mut nes = Nes::new(game_file, display.clone(), input).expect("Could not start the game");
+    let mut nes = Nes::new(game_file, display, input).expect("Could not start the game");
 
     let mut state = EmulatorState {
         running: false,
@@ -1440,7 +1544,7 @@ fn main() {
         stop_on_program_counter: None,
     };
 
-    display.actual_display();
+    game_window.borrow_mut().actual_display();
     debug_display.update(&nes);
     debug_display.show(&nes);
     memory_display.update(&nes);
@@ -1453,8 +1557,8 @@ fn main() {
         let start_time = std::time::Instant::now();
 
         for event in event_pump.poll_iter() {
-            if event.get_window_id() == Some(display_window_id) {
-                display.handle_event(event, &nes, &mut state);
+            if event.get_window_id() == Some(game_window_id) {
+                game_window.borrow_mut().handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(memory_window_id) {
                 memory_display.handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(debug_window_id) {
@@ -1493,7 +1597,7 @@ fn main() {
             }
         }
 
-        display.actual_display();
+        game_window.borrow_mut().actual_display();
         debug_display.show(&nes);
         memory_display.show(&nes);
         ppu_debug_display.display(&nes);

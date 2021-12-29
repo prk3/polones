@@ -14,10 +14,24 @@ pub trait Display {
     fn display(&mut self, frame: Box<Frame>);
 }
 
+pub enum PortState {
+    Unplugged,
+    Gamepad {
+        up: bool,
+        down: bool,
+        left: bool,
+        right: bool,
+        select: bool,
+        start: bool,
+        a: bool,
+        b: bool,
+    }
+}
+
 /// Abstraction over input sources (pads).
 pub trait Input {
-    fn read_pad_1(&mut self) -> Option<u8>;
-    fn read_pad_2(&mut self) -> Option<u8>;
+    fn read_port_1(&mut self) -> PortState;
+    fn read_port_2(&mut self) -> PortState;
 }
 
 /// Abstraction over audio interface.
@@ -38,7 +52,7 @@ pub struct Nes {
     pub ppu_nametable_ram: RefCell<Ram<0x800>>,
     pub ppu_palette_ram: RefCell<Ram<0x20>>,
 
-    display: RefCell<Box<dyn Display>>,
+    pub display: RefCell<Box<dyn Display>>,
     io: RefCell<Io>,
     pub input: RefCell<Box<dyn Input>>,
 }

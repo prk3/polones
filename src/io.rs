@@ -1,31 +1,49 @@
-use crate::nes::Nes;
+use crate::nes::{Nes, PortState};
 
 pub struct Io {
     latch: u8,
-    shift_register_1: u8,
-    shift_register_2: u8,
+    port_1_state: PortState,
+    port_2_state: PortState,
+    gamepad_shift_register_1: u8,
+    gamepad_shift_register_2: u8,
 }
 
 impl Io {
     pub fn new() -> Self {
         Self {
             latch: 0,
-            shift_register_1: 0,
-            shift_register_2: 0,
+            port_1_state: PortState::Unplugged,
+            port_2_state: PortState::Unplugged,
+            gamepad_shift_register_1: 0,
+            gamepad_shift_register_2: 0,
         }
     }
 
     pub fn read(&mut self, nes: &Nes, address: u16) -> u8 {
         match 0x4016 + (address & 1) {
             0x4016 => {
-                let result = self.shift_register_1 & 1;
-                self.shift_register_1 >>= 1;
-                result
+                match self.port_1_state {
+                    PortState::Unplugged => {
+                        0
+                    }
+                    PortState::Gamepad { .. } => {
+                        let result = (self.gamepad_shift_register_1 & 0b10000000) >> 7;
+                        self.gamepad_shift_register_1 <<= 1;
+                        result
+                    }
+                }
             }
             0x4017 => {
-                let result = self.shift_register_2 & 1;
-                self.shift_register_2 >>= 1;
-                result
+                match self.port_1_state {
+                    PortState::Unplugged => {
+                        0
+                    }
+                    PortState::Gamepad { .. } => {
+                        let result = (self.gamepad_shift_register_2 & 0b10000000) >> 7;
+                        self.gamepad_shift_register_2 <<= 1;
+                        result
+                    }
+                }
             }
             _ => unreachable!(),
         }
@@ -34,12 +52,42 @@ impl Io {
     pub fn write(&mut self, nes: &Nes, address: u16, value: u8) {
         match 0x4016 + (address & 1) {
             0x4016 => {
-                self.latch = value & 0b111;
-                if self.latch & 1 == 1 {
-                    let mut input = nes.input.borrow_mut();
-                    self.shift_register_1 = input.read_pad_1().unwrap_or(0);
-                    self.shift_register_2 = input.read_pad_2().unwrap_or(0);
+                let mut input = nes.input.borrow_mut();
+                self.port_1_state = input.read_port_1();
+                self.port_2_state = input.read_port_2();
+                match self.port_1_state {
+                    PortState::Unplugged => {},
+                    PortState::Gamepad { up, down, left, right, select, start, a, b } => {
+                        if self.latch & 1 == 1 && value & 1 == 0 {
+                            self.gamepad_shift_register_1 =
+                                (a as u8) << 7 |
+                                (b as u8) << 6 |
+                                (select as u8) << 5 |
+                                (start as u8) << 4 |
+                                (up as u8) << 3 |
+                                (down as u8) << 2 |
+                                (left as u8) << 1 |
+                                (right as u8) << 0;
+                        }
+                    }
                 }
+                match self.port_2_state {
+                    PortState::Unplugged => {},
+                    PortState::Gamepad { up, down, left, right, select, start, a, b } => {
+                        if self.latch & 1 == 1 && value & 1 == 0 {
+                            self.gamepad_shift_register_2 =
+                                (a as u8) << 7 |
+                                (b as u8) << 6 |
+                                (select as u8) << 5 |
+                                (start as u8) << 4 |
+                                (up as u8) << 3 |
+                                (down as u8) << 2 |
+                                (left as u8) << 1 |
+                                (right as u8) << 0;
+                        }
+                    }
+                }
+                self.latch = value & 0b111;
             }
             0x4017 => {
                 eprintln!("IO: Write to 4017 ignored.");

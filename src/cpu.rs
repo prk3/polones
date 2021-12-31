@@ -257,7 +257,7 @@ impl Cpu {
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_accumulator = false;
-        self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.x_index as u16);
+        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;
@@ -271,7 +271,7 @@ impl Cpu {
         let high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
 
         self.operand_accumulator = false;
-        self.operand_address = ((high as u16) << 8) | (low as u16).wrapping_add(self.y_index as u16);
+        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;
@@ -293,16 +293,29 @@ impl Cpu {
     }
 
     fn address_mode_indirect(&mut self, nes: &Nes) {
-        let ptr_low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
-        let ptr_high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
+        let ptr_addr_low = nes.cpu_bus_read(self.program_counter.wrapping_add(1));
+        let ptr_addr_high = nes.cpu_bus_read(self.program_counter.wrapping_add(2));
+        let ptr_addr = ((ptr_addr_high as u16) << 8) | ptr_addr_low as u16;
+
+        let ptr_low;
+        let ptr_high;
+
+        // JMP indirect is buggy. If the first (low) byte of the pointer is 0xFF,
+        // then the second (high) byte will be fetched from the 0x00 byte of the
+        // same page, not the next.
+
+        if ptr_addr_low == 0xFF {
+            ptr_low = nes.cpu_bus_read(ptr_addr);
+            ptr_high = nes.cpu_bus_read(ptr_addr & 0xFF00);
+        } else {
+            ptr_low = nes.cpu_bus_read(ptr_addr);
+            ptr_high = nes.cpu_bus_read(ptr_addr.wrapping_add(1));
+        }
 
         let ptr = ((ptr_high as u16) << 8) | ptr_low as u16;
 
-        let low = nes.cpu_bus_read(ptr);
-        let high = nes.cpu_bus_read(ptr.wrapping_add(1));
-
         self.operand_accumulator = false;
-        self.operand_address = ((high as u16) << 8) | (low as u16);
+        self.operand_address = ptr;
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 

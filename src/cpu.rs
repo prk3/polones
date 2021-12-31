@@ -161,11 +161,11 @@ impl Cpu {
     fn run_nmi(&mut self, nes: &Nes) {
         let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
         let low = self.program_counter.wrapping_add(2) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
 
         let saved_status_register = self.status_register;
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -178,11 +178,11 @@ impl Cpu {
     fn run_irq(&mut self, nes: &Nes) {
         let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
         let low = self.program_counter.wrapping_add(2) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
 
         let saved_status_register = self.status_register;
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -377,13 +377,13 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
-        let sum = (self.accumulator as u16).wrapping_add(operand_byte as u16).wrapping_add(self.status_register.get_carry() as u16);
-        self.accumulator = sum as u8;
+        let result = self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
+        self.accumulator = result as u8;
 
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
-        self.status_register.set_carry(sum & 0xFF > 0);
-        self.status_register.set_overflow((old_accumulator ^ self.accumulator) & (old_accumulator ^ operand_byte) & 0b10000000 > 1);
+        self.status_register.set_carry(result > 0xFF);
+        self.status_register.set_overflow((old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0);
     }
 
     // AND
@@ -399,14 +399,14 @@ impl Cpu {
 
     // ASL
     fn arithmetic_shift_left(&mut self, nes: &Nes) {
-        let operand_byte = self.get_operand_byte(nes);
-        let carry = operand_byte & 0b10000000;
+        let mut operand_byte = self.get_operand_byte(nes);
+        let leftmost_bit = operand_byte & 0b10000000;
+        operand_byte <<= 1;
 
-        self.accumulator = (self.accumulator & 0b01111111) << 1;
-
-        self.status_register.set_zero(self.accumulator == 0);
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
-        self.status_register.set_carry(carry > 0);
+        self.status_register.set_zero(operand_byte == 0);
+        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register.set_carry(leftmost_bit > 0);
+        self.set_operand_byte(nes, operand_byte);
     }
 
     // BCC
@@ -423,14 +423,14 @@ impl Cpu {
         }
     }
 
-    // BCS
+    // BEQ
     fn branch_on_equal(&mut self, nes: &Nes) {
         if self.status_register.get_zero() {
             self.branch(nes);
         }
     }
 
-    // BCS
+    // BIT
     fn bit_test(&mut self, nes: &Nes) {
         let operand_byte = self.get_operand_byte(nes);
         let accumulator_and_operand = self.accumulator & operand_byte;
@@ -467,12 +467,12 @@ impl Cpu {
         // we're saving PC+1 because the first byte after BRK instruction is the break reason
         let high = (self.program_counter.wrapping_add(1) >> 8) as u8;
         let low = self.program_counter.wrapping_add(1) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, high);
 
         let mut saved_status_register = self.status_register;
         saved_status_register.set_break(true);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(3) as u16, saved_status_register.0);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -531,15 +531,15 @@ impl Cpu {
         let x_minus_operand = self.x_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(x_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == operand_byte);
-        self.status_register.set_carry(self.accumulator >= operand_byte);
+        self.status_register.set_carry(self.x_index >= operand_byte);
     }
 
     // CPY
     fn compare_with_y(&mut self, nes: &Nes) {
         let operand_byte = self.get_operand_byte(nes);
-        let y_minus_operand = self.x_index.wrapping_sub(operand_byte);
+        let y_minus_operand = self.y_index.wrapping_sub(operand_byte);
         self.status_register.set_negative(y_minus_operand & 0b10000000 > 0);
-        self.status_register.set_zero(self.y_index == 0);
+        self.status_register.set_zero(self.y_index == operand_byte);
         self.status_register.set_carry(self.y_index >= operand_byte);
     }
 
@@ -602,9 +602,13 @@ impl Cpu {
 
     // JSR
     fn jump_subroutine(&mut self, nes: &Nes) {
-        // program counter has already been incremented to point to the next instruction
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, self.program_counter as u8);
-        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, (self.program_counter >> 8) as u8);
+        // Program counter has already been incremented by 3 to point the the next instruction.
+        // However, JSR saves PC+2, not PC+3. That's why we decrement PC before pushing it to stack.
+        let pc = self.program_counter.wrapping_sub(1);
+        let low = pc as u8;
+        let high = (pc >> 8) as u8;
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
+        nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
         self.stack_pointer = self.stack_pointer.wrapping_sub(2);
         self.program_counter = self.operand_address;
     }
@@ -654,8 +658,8 @@ impl Cpu {
 
     // PHA
     fn push_accumulator(&mut self, nes: &Nes) {
-        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, self.accumulator);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
     // PHP
@@ -663,22 +667,22 @@ impl Cpu {
         let mut status_register_copy = self.status_register;
         status_register_copy.set_ignored(true);
         status_register_copy.set_break(true);
-        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         nes.cpu_bus_write(0x0100 + self.stack_pointer as u16, status_register_copy.0);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
     // PLA
     fn pull_accumulator(&mut self, nes: &Nes) {
-        self.accumulator = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
+        self.accumulator = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // PLP
     fn pull_processor_status(&mut self, nes: &Nes) {
-        let mut processor_status = StatusRegister(nes.cpu_bus_read(0x0100 + self.stack_pointer as u16));
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
+        let mut processor_status = StatusRegister(nes.cpu_bus_read(0x0100 + self.stack_pointer as u16));
         processor_status.set_ignored(false);
         processor_status.set_break(false);
         self.status_register = processor_status;
@@ -708,35 +712,37 @@ impl Cpu {
 
     // RTI
     fn return_from_interrupt(&mut self, nes: &Nes) {
-        self.status_register = StatusRegister(nes.cpu_bus_read(self.stack_pointer as u16));
+        self.status_register = StatusRegister(nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16));
         self.status_register.set_break(false);
         self.status_register.set_ignored(false);
-        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
         let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(2) as u16);
+        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(3) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(3);
         self.program_counter = ((high as u16) << 8) | (low as u16);
     }
 
     // RTS
     fn return_from_subroutine(&mut self, nes: &Nes) {
-        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer as u16);
         let low = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(1) as u16);
+        let high = nes.cpu_bus_read(0x0100 + self.stack_pointer.wrapping_add(2) as u16);
         self.stack_pointer = self.stack_pointer.wrapping_add(2);
-        self.program_counter = ((high as u16) << 8) | (low as u16);
+        // The program counter saved on stack is PC-1. We increment it before changing the register in CPU.
+        self.program_counter = (((high as u16) << 8) | (low as u16)).wrapping_add(1);
     }
 
     // SBC
     fn subtract_with_carry(&mut self, nes: &Nes) {
-        let operand_byte = self.get_operand_byte(nes);
+        // invert operand byte and proceed as with addition
+        let operand_byte = !self.get_operand_byte(nes);
         let old_accumulator = self.accumulator;
 
-        let difference = (self.accumulator as u16).wrapping_sub(operand_byte as u16).wrapping_sub(self.status_register.get_carry() as u16);
-        self.accumulator = difference as u8;
+        let result = self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
+        self.accumulator = result as u8;
 
         self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
-        self.status_register.set_carry(difference & 0xFF > 0);
-        self.status_register.set_overflow((old_accumulator ^ self.accumulator) & (old_accumulator ^ operand_byte) & 0b10000000 > 1);
+        self.status_register.set_carry(result > 0xFF);
+        self.status_register.set_overflow((old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0);
     }
 
     // SEC
@@ -1093,7 +1099,7 @@ impl Cpu {
 
     fn run_E4(&mut self, nes: &Nes) {
         self.address_mode_zeropage(nes);
-        self.compare_with_y(nes);
+        self.compare_with_x(nes);
         self.sleep_cycles += 3;
     }
 

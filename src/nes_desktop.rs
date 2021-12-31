@@ -287,7 +287,7 @@ impl SdlGameWindow {
                 self.gamepad_1_select = false;
             }
             Event::KeyUp { keycode: _k @ Some(Keycode::T), .. } => {
-                self.gamepad_1_start = false;
+                // self.gamepad_1_start = false;
             }
             Event::KeyUp { keycode: _k @ Some(Keycode::F), .. } => {
                 self.gamepad_1_b = false;

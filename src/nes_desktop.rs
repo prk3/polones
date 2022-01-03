@@ -573,6 +573,7 @@ struct SdlDebugDisplay {
     breakpoint_address: u16,
     breakpoint_pos: i8,
     breakpoints: Vec<u16>,
+    nmi_breakpoint: u16,
     disassembly: [DisassemblyValue; 1 << 16],
 }
 
@@ -633,6 +634,7 @@ impl SdlDebugDisplay {
             breakpoint_address: 0,
             breakpoint_pos: 0,
             breakpoints,
+            nmi_breakpoint: 0,
             text_area: TextArea::new(),
             disassembly: [DisassemblyValue::Unknown; 1 << 16],
         }
@@ -895,6 +897,16 @@ impl SdlDebugDisplay {
                     state.exit = true;
                 }
                 Event::KeyDown {
+                    keycode: _k @ Some(Keycode::N),
+                    ..
+                } => {
+                    if self.breakpoints.contains(&self.nmi_breakpoint) {
+                        self.breakpoints.retain(|b| *b != self.nmi_breakpoint);
+                    } else {
+                        self.breakpoints.push(self.nmi_breakpoint);
+                    }
+                }
+                Event::KeyDown {
                     keycode: _k @ Some(Keycode::B),
                     ..
                 } => {
@@ -934,6 +946,12 @@ impl SdlDebugDisplay {
         self.text_area.clear();
         let cpu = nes.cpu.borrow();
         let ta = &mut self.text_area;
+
+        {
+            let low = nes.borrow().cpu_bus_read(0xFFFA);
+            let high = nes.borrow().cpu_bus_read(0xFFFB);
+            self.nmi_breakpoint = ((high as u16) << 8) | low as u16;
+        }
 
         ta.write_str_with_color("A", 0, 1, Yellow);
         ta.write_u8_with_color(cpu.accumulator, 0, 3, White);
@@ -977,7 +995,11 @@ impl SdlDebugDisplay {
         ta.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, White);
 
         if self.breakpoint_mode {
-            ta.write_char_with_color('B', 29, 0, Red);
+            ta.write_char_with_color('B', 28, 0, Red);
+        }
+
+        if self.breakpoints.contains(&self.nmi_breakpoint) {
+            ta.write_str_with_color("NMI", 29, 0, Red);
         }
 
         let mut address = cpu.program_counter;
@@ -1377,7 +1399,7 @@ impl SdlPpuDebugDisplay {
         ta.write_bool_with_color(ppu.control_register.get_sprite_tile_select(), 8, 7, White);
 
         ta.write_str_with_color("INC", 9, 3, Yellow);
-        ta.write_bool_with_color(ppu.control_register.get_sprite_height(), 9, 7, White);
+        ta.write_bool_with_color(ppu.control_register.get_increment_mode(), 9, 7, White);
 
         ta.write_str_with_color("NTADDR", 10, 0, Yellow);
         ta.write_u8_with_color(ppu.control_register.get_name_table_address(), 10, 7, White);
@@ -1538,7 +1560,7 @@ fn main() {
     let mut nes = Nes::new(game_file, display, input).expect("Could not start the game");
 
     let mut state = EmulatorState {
-        running: false,
+        running: true,
         exit: false,
         one_step: false,
         stop_on_program_counter: None,

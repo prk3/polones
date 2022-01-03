@@ -27,6 +27,8 @@ pub struct Cpu {
     dma_byte: u8,
     dma_cycles_left: u16,
     cycle_odd: bool,
+
+    pub cycle: u64,
 }
 
 #[allow(non_snake_case)]
@@ -63,6 +65,8 @@ impl Cpu {
             dma_byte: 0,
             dma_cycles_left: 0,
             cycle_odd: false,
+
+            cycle: 0,
         }
     }
     // thanks
@@ -113,6 +117,7 @@ impl Cpu {
 
     pub fn tick(&mut self, nes: &Nes) {
         self.cycle_odd = !self.cycle_odd;
+        self.cycle += 1;
 
         if self.dma_cycles_left > 0 {
             self.run_dma(nes);
@@ -159,8 +164,8 @@ impl Cpu {
     }
 
     fn run_nmi(&mut self, nes: &Nes) {
-        let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
-        let low = self.program_counter.wrapping_add(2) as u8;
+        let high = (self.program_counter >> 8) as u8;
+        let low = self.program_counter as u8;
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
 
@@ -176,8 +181,8 @@ impl Cpu {
     }
 
     fn run_irq(&mut self, nes: &Nes) {
-        let high = (self.program_counter.wrapping_add(2) >> 8) as u8;
-        let low = self.program_counter.wrapping_add(2) as u8;
+        let high = (self.program_counter >> 8) as u8;
+        let low = self.program_counter as u8;
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(0) as u16, high);
         nes.cpu_bus_write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
 
@@ -1887,9 +1892,10 @@ impl Cpu {
     // FF - illegal
 
     fn run_xx(&mut self, nes: &Nes) {
-        eprintln!("Illegal opcode found ({:#02}). Running noop.", self.opcode);
-        self.program_counter = self.program_counter.wrapping_add(1);
-        self.sleep_cycles = 2;
+        eprintln!("CPU: Illegal opcode ({:#02}) at ({:04X}). Running noop.", self.opcode, self.program_counter.wrapping_sub(1));
+        self.address_mode_implied(nes);
+        self.no_operation(nes);
+        self.sleep_cycles += 2;
     }
 }
 

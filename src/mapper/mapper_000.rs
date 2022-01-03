@@ -12,7 +12,8 @@ impl Mapper for Mapper000 {
         if game.mapper != 0 {
             return Err("Mapper 000: Unexpected mapper");
         }
-        if game.prg_rom().len() != 0x2000 && game.prg_rom().len() != 0x4000 {
+        if game.prg_rom().len() != 0x4000 && game.prg_rom().len() != 0x8000 {
+            dbg!(game.prg_rom().len());
             return Err("Mapper 000: Unexpected prg rom size");
         }
         if game.chr_rom().len() != 0x2000 {
@@ -91,8 +92,8 @@ impl Mapper for Mapper000 {
 
 #[test]
 fn test_nametable_address_mapping() {
-    let dk = include_bytes!("../../tests/games/Donkey Kong (JU).nes").to_vec();
-    let mut game = GameFile::read("donkey kong".into(), dk.clone()).unwrap();
+    let dk = include_bytes!("../../tests/roms/dk.nes").to_vec();
+    let mut game = GameFile::read("dk".into(), dk.clone()).unwrap();
     game.nametable_mirroring_vertical = true;
     let mapper = Mapper000::from_game(game).unwrap();
 

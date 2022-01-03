@@ -199,8 +199,8 @@ pub struct Ppu {
 
     pub pattern_low_shift_register: u16,
     pub pattern_high_shift_register: u16,
-    pub attribute_low_shift_register: u8,
-    pub attribute_high_shift_register: u8,
+    pub attribute_low_shift_register: u16,
+    pub attribute_high_shift_register: u16,
 
     pub nametable_byte: u8,
     pub attribute: u8,
@@ -247,7 +247,6 @@ impl Ppu {
     }
 
     pub fn tick(&mut self, nes: &Nes) {
-
         // update flags
         if self.scanline == 241 && self.dot == 1 {
             self.vblank = true;
@@ -266,33 +265,44 @@ impl Ppu {
         // deal with render and pre-render scanlines
         if self.scanline <= 239 || self.scanline == 261 {
             if (2..=257).contains(&self.dot) || (322..=337).contains(&self.dot) {
-                self.pattern_low_shift_register = self.pattern_low_shift_register << 1;
-                self.pattern_high_shift_register = self.pattern_high_shift_register << 1;
-                self.attribute_low_shift_register = self.attribute_low_shift_register << 1;
-                self.attribute_high_shift_register = self.attribute_high_shift_register << 1;
+                self.pattern_low_shift_register <<= 1;
+                self.pattern_high_shift_register <<= 1;
+                self.attribute_low_shift_register <<= 1;
+                self.attribute_high_shift_register <<= 1;
             }
             if (9..=257).contains(&self.dot) || (329..=337).contains(&self.dot) {
                 if (self.dot - 1) % 8 == 0 {
                     self.pattern_low_shift_register |= self.bg_tile_byte_low as u16;
                     self.pattern_high_shift_register |= self.bg_tile_byte_high as u16;
-                    self.attribute_low_shift_register = if self.attribute & 0b01 > 0 { 0xFF } else { 0x00 };
-                    self.attribute_high_shift_register = if self.attribute & 0b10 > 0 { 0xFF } else { 0x00 };
+                    self.attribute_low_shift_register |= if self.attribute & 0b01 > 0 {
+                        0xFF
+                    } else {
+                        0x00
+                    };
+                    self.attribute_high_shift_register |= if self.attribute & 0b10 > 0 {
+                        0xFF
+                    } else {
+                        0x00
+                    };
                 }
             }
             if self.scanline <= 239 && (1..=256).contains(&self.dot) {
                 if self.mask_register.get_show_background() {
-                    let mask_8: u8 = 0b10000000 >> self.x;
-                    let mask_16: u16 = 0b10000000_00000000 >> self.x;
-                    let pattern_low = ((self.pattern_low_shift_register & mask_16) > 0) as u8;
-                    let pattern_high = ((self.pattern_high_shift_register & mask_16) > 0) as u8;
+                    let mask: u16 = 0b10000000_00000000 >> self.x;
+                    let pattern_low = ((self.pattern_low_shift_register & mask) > 0) as u8;
+                    let pattern_high = ((self.pattern_high_shift_register & mask) > 0) as u8;
                     let color = (pattern_high << 1) | pattern_low;
-                    let palette_low = ((self.attribute_low_shift_register & mask_8) > 0) as u8;
-                    let palette_high = ((self.attribute_high_shift_register & mask_8) > 0) as u8;
+                    let palette_low = ((self.attribute_low_shift_register & mask) > 0) as u8;
+                    let palette_high = ((self.attribute_high_shift_register & mask) > 0) as u8;
                     let palette = (palette_high << 1) | palette_low;
 
-                    self.buffer[self.buffer_index / 256][self.buffer_index % 256] = PALLETTE[
-                        (nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16) & 0b00111111) as usize
-                    ];
+                    let rgb = PALLETTE[if color == 0b00 {
+                        (nes.ppu_bus_read(0x3F00) & 0b00111111) as usize
+                    } else {
+                        (nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16)
+                            & 0b00111111) as usize
+                    }];
+                    self.buffer[self.buffer_index / 256][self.buffer_index % 256] = rgb;
                 }
                 self.buffer_index += 1;
             }
@@ -310,13 +320,14 @@ impl Ppu {
                         let attribute_byte = nes.ppu_bus_read(
                             0x2000 | // nametables starting address
                             (self.v.get_nametable_select() as u16 >> 0 << 10) | // nametable select
-                            0x3C0 | // attribute offset
+                            0x03C0 | // attribute offset
                             (self.v.get_coarse_y_scroll() as u16 >> 2 << 3) |
-                            (self.v.get_coarse_x_scroll() as u16 >> 2)
+                            (self.v.get_coarse_x_scroll() as u16 >> 2),
                         );
-                        self.attribute = attribute_byte >>
-                            ((self.v.get_coarse_y_scroll() & 1) << 2) >>
-                            ((self.v.get_coarse_x_scroll() & 1) << 1);
+                        self.attribute = (attribute_byte
+                            >> ((self.v.get_coarse_y_scroll() & 2) << 1)
+                            >> (self.v.get_coarse_x_scroll() & 2))
+                            & 0b11;
                     }
                     4 => {
                         // 0HRRRR CCCCPTTT
@@ -327,18 +338,18 @@ impl Ppu {
                         // |+-------------- H: Half of sprite table (0: "left"; 1: "right")
                         // +--------------- 0: Pattern table is at $0000-$1FFF
                         self.bg_tile_byte_low = nes.ppu_bus_read(
-                            self.control_register.get_background_tile_select() as u16 >> 0 << 12 |
-                            self.nametable_byte as u16 >> 0 << 4 |
-                            self.v.get_fine_y_scroll() as u16
+                            self.control_register.get_background_tile_select() as u16 >> 0 << 12
+                                | self.nametable_byte as u16 >> 0 << 4
+                                | self.v.get_fine_y_scroll() as u16,
                         );
                     }
                     6 => {
                         // same as above, but with plane bit set
                         self.bg_tile_byte_high = nes.ppu_bus_read(
-                            self.control_register.get_background_tile_select() as u16 >> 0 << 12 |
-                            self.nametable_byte as u16 >> 0 << 4 |
-                            0b1000 |
-                            self.v.get_fine_y_scroll() as u16
+                            self.control_register.get_background_tile_select() as u16 >> 0 << 12
+                                | self.nametable_byte as u16 >> 0 << 4
+                                | 0b1000
+                                | self.v.get_fine_y_scroll() as u16,
                         );
                     }
                     7 if self.dot != 256 => {
@@ -352,9 +363,13 @@ impl Ppu {
                 }
             }
             if self.dot == 257 {
-                if self.mask_register.get_show_background() || self.mask_register.get_show_sprites() {
+                if self.mask_register.get_show_background() || self.mask_register.get_show_sprites()
+                {
                     self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
-                    self.v.set_nametable_select((self.v.get_nametable_select() & 0b10) | (self.t.get_nametable_select() & 0b01));
+                    self.v.set_nametable_select(
+                        (self.v.get_nametable_select() & 0b10)
+                            | (self.t.get_nametable_select() & 0b01),
+                    );
                 }
             }
             if (258..=320).contains(&self.dot) {
@@ -374,13 +389,13 @@ impl Ppu {
         }
 
         //
-        if self.dot == 257  {
-
-        }
+        if self.dot == 257 {}
         if self.scanline == 261 && self.dot >= 280 && self.dot <= 304 {
             self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
             self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
-            self.v.set_nametable_select((self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10));
+            self.v.set_nametable_select(
+                (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
+            );
         }
 
         if self.dot == 340 {
@@ -488,7 +503,8 @@ impl Ppu {
         if self.mask_register.get_show_background() || self.mask_register.get_show_sprites() {
             if self.v.get_coarse_x_scroll() == 31 {
                 self.v.set_coarse_x_scroll(0);
-                self.v.set_nametable_select(self.v.get_nametable_select() ^ 0b01);
+                self.v
+                    .set_nametable_select(self.v.get_nametable_select() ^ 0b01);
             } else {
                 self.v.set_coarse_x_scroll(self.v.get_coarse_x_scroll() + 1);
             }

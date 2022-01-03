@@ -70,7 +70,6 @@ impl OamDma {
     }
     pub fn tick(&mut self, nes: &Nes) {
         if let Some(page) = self.page {
-            println!("OAMDMA triggered from {:04X}", nes.cpu.borrow().program_counter);
             nes.cpu.borrow_mut().dma(page);
             self.page = None;
         }
@@ -160,7 +159,15 @@ impl Nes {
     }
     pub fn ppu_bus_write(&self, address: u16, value: u8) {
         match address & 0x3FFF {
-            0x3F00..=0x3FFF => self.ppu_palette_ram.borrow_mut().write(address, value),
+            _a @ 0x3F00..=0x3FFF => {
+                let mut ram = self.ppu_palette_ram.borrow_mut();
+                if address & 0b11 == 0 {
+                    ram.write(address & 0b11101111, value);
+                    ram.write(address | 0b00010000, value);
+                } else {
+                    ram.write(address, value);
+                }
+            }
             _a if self.mapper.borrow().ppu_address_mapped(address) => {
                 self.mapper.borrow_mut().ppu_write(address, value)
             }

@@ -170,6 +170,12 @@ impl Loopy {
     pub fn set_fine_y_scroll(&mut self, new: u8) {
         self.0 = (self.0 & 0b000_11_11111_11111) | ((new as u16 & 0b111) << 12);
     }
+    pub fn get_ppu_address(&self) -> u16 {
+        self.0
+    }
+    pub fn set_ppu_address(&mut self, new: u16) {
+        self.0 = new
+    }
 }
 
 pub struct Ppu {
@@ -180,9 +186,8 @@ pub struct Ppu {
     pub mask_register: MaskRegister,
     pub status_register: StatusRegister,
     pub vblank: bool,
-    pub scroll_latch: bool,
-    pub ppu_address: u16,
     pub oam_address: u8,
+    pub ppu_read_buffer: u8,
     pub horizontal_scroll: u8,
     pub vertical_scroll: u8,
     pub vertical_scroll_next_frame: u8,
@@ -220,9 +225,8 @@ impl Ppu {
             vertical_scroll: 0,
             horizontal_scroll: 0,
             vblank: false,
-            scroll_latch: false,
-            ppu_address: 0,
             oam_address: 0,
+            ppu_read_buffer: 0,
             vertical_scroll_next_frame: 0, // changes to vertical scroll don't affect the current frame
             buffer: Box::new([[(0, 0, 0); 256]; 240]),
             buffer_index: 0,
@@ -353,18 +357,21 @@ impl Ppu {
                         );
                     }
                     7 if self.dot != 256 => {
-                        self.increment_horizontal();
+                        if self.is_rendering_enabled() {
+                            self.increment_horizontal();
+                        }
                     }
                     7 if self.dot == 256 => {
-                        self.increment_horizontal();
-                        self.increment_vertical();
+                        if self.is_rendering_enabled() {
+                            self.increment_horizontal();
+                            self.increment_vertical();
+                        }
                     }
                     _ => {}
                 }
             }
             if self.dot == 257 {
-                if self.mask_register.get_show_background() || self.mask_register.get_show_sprites()
-                {
+                if self.is_rendering_enabled() {
                     self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
                     self.v.set_nametable_select(
                         (self.v.get_nametable_select() & 0b10)
@@ -388,14 +395,15 @@ impl Ppu {
             nes.display.borrow_mut().display(buffer);
         }
 
-        //
         if self.dot == 257 {}
         if self.scanline == 261 && self.dot >= 280 && self.dot <= 304 {
-            self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
-            self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
-            self.v.set_nametable_select(
-                (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
-            );
+            if self.is_rendering_enabled() {
+                self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
+                self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
+                self.v.set_nametable_select(
+                    (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
+                );
+            }
         }
 
         if self.dot == 340 {
@@ -429,16 +437,33 @@ impl Ppu {
                 let result =
                     (vblank as u8) << 7 | (sprite_hit as u8) << 6 | (sprite_overflow as u8) << 5;
                 self.status_register.set_vblank_flag(false);
-                self.scroll_latch = false;
                 self.w = false;
                 result
             }
             0x2004 => self.oam[self.oam_address as usize],
             0x2007 => {
-                let result = nes.ppu_bus_read(self.ppu_address);
-                self.ppu_address = (self.ppu_address
-                    + (1 << (self.control_register.get_increment_mode() as u8 * 5)))
-                    & 0b0011_1111_1111_1111;
+                let result;
+
+                // Reading from memory other than palette RAM writes to PPU
+                // read buffer and return the previous value from the buffer.
+                if self.v.get_ppu_address() & 0x3FFF < 0x3F00 {
+                    result = self.ppu_read_buffer;
+                    self.ppu_read_buffer = nes.ppu_bus_read(self.v.get_ppu_address());
+                } else {
+                    result = nes.ppu_bus_read(self.v.get_ppu_address());
+                    // Reads from palette area fill the PPU read buffer with
+                    // that's "behind" palette memory - nametable data. Because
+                    // that these addresses are mapped to the palette RAM, we
+                    // decrement the address to read from lower mirror of nametables.
+                    self.ppu_read_buffer =
+                        nes.ppu_bus_read((self.v.get_ppu_address() & 0x3FFF) - 0x1000);
+                }
+
+                self.v.set_ppu_address(
+                    (self.v.get_ppu_address()
+                        + (1 << (self.control_register.get_increment_mode() as u16 * 5)))
+                        & 0b0011_1111_1111_1111,
+                );
                 result
             }
             other => {
@@ -478,25 +503,33 @@ impl Ppu {
             }
             0x2006 => {
                 if !self.w {
-                    self.t.0 = (self.t.0 & 0x00FF) | ((value as u16 & 0b00111111) << 8);
-                    self.ppu_address =
-                        ((self.ppu_address & 0x00FF) | (value as u16) << 8) & 0b0011_1111_1111_1111;
+                    self.t.set_ppu_address(
+                        (self.t.get_ppu_address() & 0x00FF)
+                            | ((value as u16) << 8) & 0b0011_1111_1111_1111,
+                    );
                 } else {
-                    self.t.0 = (self.t.0 & 0xFF00) | (value as u16);
+                    self.t.set_ppu_address(
+                        (self.t.get_ppu_address() & 0xFF00)
+                            | (value as u16) & 0b0011_1111_1111_1111,
+                    );
                     self.v.0 = self.t.0;
-                    self.ppu_address =
-                        ((self.ppu_address & 0xFF00) | (value as u16)) & 0b0011_1111_1111_1111;
                 }
                 self.w = !self.w;
             }
             0x2007 => {
-                nes.ppu_bus_write(self.ppu_address, value);
-                self.ppu_address = (self.ppu_address
-                    + (1 << (self.control_register.get_increment_mode() as u8 * 5)))
-                    & 0b0011_1111_1111_1111;
+                nes.ppu_bus_write(self.v.get_ppu_address() & 0b0011_1111_1111_1111, value);
+                self.v.set_ppu_address(
+                    (self.v.get_ppu_address()
+                        + (1 << (self.control_register.get_increment_mode() as u8 * 5)))
+                        & 0b0011_1111_1111_1111,
+                );
             }
             other => eprintln!("Write to PPU at illegal address {:04x}", other),
         }
+    }
+
+    fn is_rendering_enabled(&self) -> bool {
+        self.mask_register.get_show_sprites() || self.mask_register.get_show_background()
     }
 
     fn increment_horizontal(&mut self) {

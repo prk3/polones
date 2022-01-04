@@ -1372,9 +1372,9 @@ impl SdlPpuDebugDisplay {
 
         ta.write_str_with_color("SCROLL", 0, 14, Yellow);
         ta.write_str_with_color("H", 0, 21, Yellow);
-        ta.write_u8_with_color(ppu.horizontal_scroll, 0, 23, if ppu.scroll_latch { White } else { Magenta });
+        ta.write_u8_with_color(ppu.horizontal_scroll, 0, 23, if ppu.w { White } else { Magenta });
         ta.write_str_with_color("V", 1, 21, Yellow);
-        ta.write_u8_with_color(ppu.vertical_scroll, 1, 23, if ppu.scroll_latch { Magenta } else { White });
+        ta.write_u8_with_color(ppu.vertical_scroll, 1, 23, if ppu.w { Magenta } else { White });
 
         ta.write_str_with_color("CTRL", 3, 2, Yellow);
 
@@ -1449,8 +1449,8 @@ impl SdlPpuDebugDisplay {
         ta.write_u8_with_color(ppu.oam_address, 7, 27, White);
 
         ta.write_str_with_color("PPU ADDR", 8, 18, Yellow);
-        ta.write_u8_with_color((ppu.ppu_address >> 8) as u8, 8, 27, if ppu.w { White } else { Magenta });
-        ta.write_u8_with_color(ppu.ppu_address as u8, 8, 29, if ppu.w { Magenta } else { White });
+        ta.write_u8_with_color((ppu.t.get_ppu_address() >> 8) as u8, 8, 27, if ppu.w { White } else { Magenta });
+        ta.write_u8_with_color(ppu.t.get_ppu_address() as u8, 8, 29, if ppu.w { Magenta } else { White });
 
         self.texture
             .with_lock(None, |data, _pitch| {

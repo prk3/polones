@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use crate::nes::{Frame, Nes};
 
 pub static PALLETTE: [(u8, u8, u8); 64] = [
@@ -131,8 +129,9 @@ impl StatusRegister {
     fn new() -> Self {
         Self(0)
     }
-    flag_methods!(get_hit_flag,    set_hit_flag,    1);
-    flag_methods!(get_vblank_flag, set_vblank_flag, 0);
+    flag_methods!(get_vblank_flag,          set_vblank_flag,          7);
+    flag_methods!(get_sprite_0_hit_flag,    set_sprite_0_hit_flag,    6);
+    flag_methods!(get_sprite_overflow_flag, set_sprite_overflow_flag, 5);
 }
 
 // yyy NN YYYYY XXXXX
@@ -211,6 +210,15 @@ pub struct Ppu {
     pub attribute: u8,
     pub bg_tile_byte_low: u8,
     pub bg_tile_byte_high: u8,
+
+    pub sprite_limit: usize,
+    pub sprite_secondary_oam: [u8; 256],
+    sprite_patterns_low: [u8; 64],
+    sprite_patterns_high: [u8; 64],
+    sprite_attributes: [u8; 64],
+    sprite_counters: [u8; 64],
+    sprite_0_next_scanline: bool,
+    sprite_0_current_scanline: bool,
 }
 
 impl Ppu {
@@ -247,6 +255,15 @@ impl Ppu {
             attribute: 0,
             bg_tile_byte_low: 0,
             bg_tile_byte_high: 0,
+
+            sprite_limit: 8,
+            sprite_secondary_oam: [0xFF; 256],
+            sprite_patterns_low: [0; 64],
+            sprite_patterns_high: [0; 64],
+            sprite_attributes: [0; 64],
+            sprite_counters: [0xFF; 64],
+            sprite_0_next_scanline: false,
+            sprite_0_current_scanline: false,
         }
     }
 
@@ -262,8 +279,104 @@ impl Ppu {
         if self.scanline == 261 && self.dot == 1 {
             self.vblank = false;
             self.status_register.set_vblank_flag(false);
-            // TODO clear sprite 0
-            // TODO clear overflow
+            self.status_register.set_sprite_0_hit_flag(false);
+            self.status_register.set_sprite_overflow_flag(false);
+        }
+
+        // secondary oam clear
+        if self.scanline <= 239 && self.dot == 64 {
+            for byte in &mut self.sprite_secondary_oam[..] {
+                *byte = 0xFF;
+            }
+        }
+
+        // sprite evaluation for next scanline
+        if self.scanline <= 239 && self.dot == 256 {
+            let mut n = 0;
+            let mut n_on_overflow = 0;
+            let mut sprites_found = 0;
+            let sprite_height = 8 << (self.control_register.get_sprite_height() as u8);
+
+            self.sprite_0_next_scanline = false;
+
+            loop {
+                let y = self.oam[n * 4 + 0];
+                self.sprite_secondary_oam[sprites_found * 4 + 0] = y;
+                if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+                    self.sprite_secondary_oam[sprites_found * 4 + 1] = self.oam[n * 4 + 1];
+                    self.sprite_secondary_oam[sprites_found * 4 + 2] = self.oam[n * 4 + 2];
+                    self.sprite_secondary_oam[sprites_found * 4 + 3] = self.oam[n * 4 + 3];
+                    sprites_found += 1;
+
+                    if n == 0 {
+                        self.sprite_0_next_scanline = true;
+                    }
+                }
+                n += 1;
+                if n == 64 {
+                    break;
+                }
+                if sprites_found == 8 {
+                    n_on_overflow = n;
+                }
+                if sprites_found == self.sprite_limit {
+                    break;
+                }
+            }
+            if sprites_found == 8 {
+                let mut m = 0;
+                n = n_on_overflow;
+                while n < 64 {
+                    let y = self.oam[n * 4 + m];
+                    if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+                        self.status_register.set_sprite_overflow_flag(true);
+                        break;
+                    } else {
+                        n += 1;
+                        // hardware bug
+                        m = (n + 1) & 0b11;
+
+                        if n == 64 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // sprite tile fetches
+        if (self.scanline <= 239 || self.scanline == 261) && (257..=320).contains(&self.dot) {
+            let nth = self.dot - 257;
+            let sprite_number = nth as usize >> 3;
+            match nth % 8 {
+                0 => {
+                    // garbage NT read
+                    nes.ppu_bus_read(0x2000);
+                }
+                2 => {
+                    // garbage AT read
+                    nes.ppu_bus_read(0x23C0);
+                    self.sprite_attributes[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 2];
+                }
+                3 => {
+                    self.sprite_counters[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 3];
+                }
+                4 => {
+                    self.set_oam_pattern(nes, sprite_number, false);
+                }
+                6 => {
+                    self.set_oam_pattern(nes, sprite_number, true);
+                }
+                _ => {}
+            }
+        }
+        if (self.scanline <= 239 || self.scanline == 261) && self.dot == 320 {
+            for sprite_number in 8..63 {
+                self.sprite_counters[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 3];
+                self.set_oam_pattern(nes, sprite_number, false);
+                self.set_oam_pattern(nes, sprite_number, true);
+            }
+            self.sprite_0_current_scanline = self.sprite_0_next_scanline;
         }
 
         // deal with render and pre-render scanlines
@@ -273,6 +386,16 @@ impl Ppu {
                 self.pattern_high_shift_register <<= 1;
                 self.attribute_low_shift_register <<= 1;
                 self.attribute_high_shift_register <<= 1;
+            }
+            if (2..=257).contains(&self.dot) {
+                for i in 0..64 {
+                    if self.sprite_counters[i] > 0 {
+                        self.sprite_counters[i] -= 1;
+                    } else {
+                        self.sprite_patterns_low[i] <<= 1;
+                        self.sprite_patterns_high[i] <<= 1;
+                    }
+                }
             }
             if (9..=257).contains(&self.dot) || (329..=337).contains(&self.dot) {
                 if (self.dot - 1) % 8 == 0 {
@@ -291,6 +414,7 @@ impl Ppu {
                 }
             }
             if self.scanline <= 239 && (1..=256).contains(&self.dot) {
+                let mut background = None;
                 if self.mask_register.get_show_background() {
                     let mask: u16 = 0b10000000_00000000 >> self.x;
                     let pattern_low = ((self.pattern_low_shift_register & mask) > 0) as u8;
@@ -300,14 +424,74 @@ impl Ppu {
                     let palette_high = ((self.attribute_high_shift_register & mask) > 0) as u8;
                     let palette = (palette_high << 1) | palette_low;
 
-                    let rgb = PALLETTE[if color == 0b00 {
-                        (nes.ppu_bus_read(0x3F00) & 0b00111111) as usize
-                    } else {
-                        (nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16)
-                            & 0b00111111) as usize
-                    }];
-                    self.buffer[self.buffer_index / 256][self.buffer_index % 256] = rgb;
+                    background = Some((color, palette));
                 }
+                let mut foreground = None;
+                if self.mask_register.get_show_sprites() {
+                    for i in 0..self.sprite_limit {
+                        if self.sprite_counters[i] == 0 {
+                            let color_low = self.sprite_patterns_low[i] >> 7;
+                            let color_high = self.sprite_patterns_high[i] >> 7;
+                            if color_low != 0 || color_high != 0 {
+                                // check sprite 0 hit
+                                let color  = (color_high << 1) | color_low;
+                                let palette = self.sprite_attributes[i] & 0b11;
+                                let priority_back = (self.sprite_attributes[i] >> 5) & 1 == 1;
+                                foreground = Some((color, palette, priority_back, i));
+                                break;
+                            }
+                        }
+                    }
+                }
+                let get_bg_color = |color: u8, palette: u8| {
+                    if color == 0b00 {
+                        nes.ppu_bus_read(0x3F00) & 0b00111111
+                    } else {
+                        nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16)
+                            & 0b00111111
+                    }
+                };
+                let get_fg_color = |color: u8, palette: u8| {
+                    if color == 0b00 {
+                        nes.ppu_bus_read(0x3F10) & 0b00111111
+                    } else {
+                        nes.ppu_bus_read(0x3F10 | (palette << 2) as u16 | color as u16)
+                            & 0b00111111
+                    }
+                };
+                let get_rgb = |color: u8| {
+                    PALLETTE[color as usize]
+                };
+
+                let rgb = match (foreground, background) {
+                    (Some((fg_color, fg_palette, fg_priority_back, sprite_index)), Some((bg_color, bg_palette))) => {
+
+                        let sprite_0_hit_can_occur = self.sprite_0_current_scanline;
+                        let sprite_0_hit = sprite_index == 0 && fg_color != 0 && bg_color != 0;
+
+                        if sprite_0_hit_can_occur && sprite_0_hit {
+                            self.sprite_0_current_scanline = false;
+                            self.status_register.set_sprite_0_hit_flag(true);
+                        }
+
+                        if (!fg_priority_back && fg_color != 0) || bg_color == 0 {
+                            get_rgb(get_fg_color(fg_color, fg_palette))
+                        } else {
+                            get_rgb(get_bg_color(bg_color, bg_palette))
+                        }
+                    }
+                    (Some((fg_color, fg_palette, _fg_priority, _sprite_index)), None) => {
+                        get_rgb(get_fg_color(fg_color, fg_palette))
+                    }
+                    (None, Some((bg_color, bg_palette))) => {
+                        get_rgb(get_bg_color(bg_color, bg_palette))
+                    }
+                    (None, None) => {
+                        (0, 0, 0)
+                    }
+                };
+                self.buffer[self.buffer_index / 256][self.buffer_index % 256] = rgb;
+
                 self.buffer_index += 1;
             }
             if (1..=256).contains(&self.dot) || (321..=336).contains(&self.dot) {
@@ -431,11 +615,7 @@ impl Ppu {
     pub fn cpu_read(&mut self, nes: &Nes, address: u16) -> u8 {
         match 0x2000 + (address & 0x0007) {
             0x2002 => {
-                let vblank = self.status_register.get_vblank_flag();
-                let sprite_hit = false; // TODO
-                let sprite_overflow = false; // TODO
-                let result =
-                    (vblank as u8) << 7 | (sprite_hit as u8) << 6 | (sprite_overflow as u8) << 5;
+                let result = self.status_register.0;
                 self.status_register.set_vblank_flag(false);
                 self.w = false;
                 result
@@ -563,5 +743,70 @@ impl Ppu {
                 }
             }
         }
+    }
+
+    fn set_oam_pattern(&mut self, nes: &Nes, sprite_number: usize, pattern_high: bool) {
+        let y = self.sprite_secondary_oam[sprite_number * 4 + 0] as u16;
+        let index = self.sprite_secondary_oam[sprite_number * 4 + 1];
+        let attributes = self.sprite_secondary_oam[sprite_number * 4 + 2];
+        let flip_horizontally = attributes & 0b01000000 > 0;
+        let flip_vertically = attributes & 0b10000000 > 0;
+
+        let sprite_height = 8 << (self.control_register.get_sprite_height() as u8);
+
+        let target = if pattern_high {
+            &mut self.sprite_patterns_high
+        } else {
+            &mut self.sprite_patterns_low
+        };
+
+        if self.scanline < y || self.scanline >= y + sprite_height {
+            target[sprite_number] = 0;
+            return;
+        }
+
+        let scanline_offset = self.scanline - y;
+        let character_table;
+        let tile_offset;
+        let tile_row_number;
+
+        if sprite_height == 16 {
+            character_table = index & 1;
+            tile_offset =
+                (index & 0b11111110) | ((scanline_offset > 7) ^ flip_vertically) as u8;
+            tile_row_number = if flip_vertically {
+                7 - (scanline_offset & 0b111)
+            } else {
+                scanline_offset & 0b111
+            };
+        } else {
+            character_table = self.control_register.get_sprite_tile_select() as u8;
+            tile_offset = index;
+            tile_row_number = if flip_vertically {
+                7 - scanline_offset
+            } else {
+                scanline_offset
+            }
+        };
+        // 0HRRRR CCCCPTTT
+        // |||||| |||||+++- T: Fine Y offset, the row number within a tile
+        // |||||| ||||+---- P: Bit plane (0: "lower"; 1: "upper")
+        // |||||| ++++----- C: Tile column
+        // ||++++---------- R: Tile row
+        // |+-------------- H: Half of sprite table (0: "left"; 1: "right")
+        // +--------------- 0: Pattern table is at $0000-$1FFF
+        let tile_row = nes.ppu_bus_read(
+            (character_table as u16) << 12
+                | (tile_offset as u16) << 4
+                | (index as u16) << 4
+                | (pattern_high as u16) << 3
+                | tile_row_number,
+        );
+
+        target[sprite_number] = if flip_horizontally {
+            tile_row.reverse_bits()
+        } else {
+            tile_row
+        };
     }
 }

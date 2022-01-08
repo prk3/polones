@@ -374,6 +374,7 @@ impl Display for SdlDisplay {
         let SdlGameWindow {
             canvas, texture, ..
         } = &mut *inner;
+        canvas.clear();
         canvas
             .copy(&texture, frame_rect, scaled_frame_rect)
             .unwrap();
@@ -1442,15 +1443,18 @@ impl SdlPpuDebugDisplay {
         ta.write_str_with_color("VBLANK", 4, 18, Yellow);
         ta.write_bool_with_color(ppu.status_register.get_vblank_flag(), 4, 25, White);
 
-        ta.write_str_with_color("S0H", 5, 21, Yellow);
-        ta.write_bool_with_color(ppu.status_register.get_hit_flag(), 5, 25, White);
+        ta.write_str_with_color("S0 HIT", 5, 18, Yellow);
+        ta.write_bool_with_color(ppu.status_register.get_sprite_0_hit_flag(), 5, 25, White);
 
-        ta.write_str_with_color("OAM ADDR", 7, 18, Yellow);
-        ta.write_u8_with_color(ppu.oam_address, 7, 27, White);
+        ta.write_str_with_color("S OVER", 6, 18, Yellow);
+        ta.write_bool_with_color(ppu.status_register.get_sprite_overflow_flag(), 6, 25, White);
 
-        ta.write_str_with_color("PPU ADDR", 8, 18, Yellow);
-        ta.write_u8_with_color((ppu.t.get_ppu_address() >> 8) as u8, 8, 27, if ppu.w { White } else { Magenta });
-        ta.write_u8_with_color(ppu.t.get_ppu_address() as u8, 8, 29, if ppu.w { Magenta } else { White });
+        ta.write_str_with_color("OAM ADDR", 8, 18, Yellow);
+        ta.write_u8_with_color(ppu.oam_address, 8, 27, White);
+
+        ta.write_str_with_color("PPU ADDR", 9, 18, Yellow);
+        ta.write_u8_with_color((ppu.t.get_ppu_address() >> 8) as u8, 9, 27, if ppu.w { White } else { Magenta });
+        ta.write_u8_with_color(ppu.t.get_ppu_address() as u8, 9, 29, if ppu.w { Magenta } else { White });
 
         self.texture
             .with_lock(None, |data, _pitch| {
@@ -1600,7 +1604,7 @@ fn main() {
             memory_display.update(&nes);
             state.one_step = false;
         } else if state.running {
-            for _ in 0..357954 {
+            for _ in 0..29829 {
                 nes.run_one_cpu_tick();
                 debug_display.update(&nes);
                 memory_display.update(&nes);

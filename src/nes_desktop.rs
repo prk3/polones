@@ -1629,12 +1629,10 @@ fn main() {
         ppu_debug_display.display(&nes);
 
         // 60fps
-        if !state.running {
-            let nanos_to_sleep =
-                Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
-            if nanos_to_sleep != Duration::ZERO {
-                std::thread::sleep(nanos_to_sleep);
-            }
+        let nanos_to_sleep =
+            Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
+        if nanos_to_sleep != Duration::ZERO {
+            std::thread::sleep(nanos_to_sleep);
         }
 
         // i += 1;

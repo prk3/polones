@@ -268,7 +268,7 @@ impl Ppu {
     }
 
     pub fn tick(&mut self, nes: &Nes) {
-        // update flags
+        // vblank start
         if self.scanline == 241 && self.dot == 1 {
             self.vblank = true;
             self.status_register.set_vblank_flag(true);
@@ -276,6 +276,7 @@ impl Ppu {
                 nes.cpu.borrow_mut().nmi();
             }
         }
+        // vblank end
         if self.scanline == 261 && self.dot == 1 {
             self.vblank = false;
             self.status_register.set_vblank_flag(false);
@@ -356,10 +357,12 @@ impl Ppu {
                 2 => {
                     // garbage AT read
                     nes.ppu_bus_read(0x23C0);
-                    self.sprite_attributes[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 2];
+                    self.sprite_attributes[sprite_number] =
+                        self.sprite_secondary_oam[sprite_number * 4 + 2];
                 }
                 3 => {
-                    self.sprite_counters[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 3];
+                    self.sprite_counters[sprite_number] =
+                        self.sprite_secondary_oam[sprite_number * 4 + 3];
                 }
                 4 => {
                     self.set_oam_pattern(nes, sprite_number, false);
@@ -370,9 +373,11 @@ impl Ppu {
                 _ => {}
             }
         }
+        // sprite 8-63 fetches
         if (self.scanline <= 239 || self.scanline == 261) && self.dot == 320 {
             for sprite_number in 8..63 {
-                self.sprite_counters[sprite_number] = self.sprite_secondary_oam[sprite_number * 4 + 3];
+                self.sprite_counters[sprite_number] =
+                    self.sprite_secondary_oam[sprite_number * 4 + 3];
                 self.set_oam_pattern(nes, sprite_number, false);
                 self.set_oam_pattern(nes, sprite_number, true);
             }
@@ -415,7 +420,9 @@ impl Ppu {
             }
             if self.scanline <= 239 && (1..=256).contains(&self.dot) {
                 let mut background = None;
-                if self.mask_register.get_show_background() {
+                if self.mask_register.get_show_background()
+                    && !(!self.mask_register.get_show_background_in_leftmost_col() && self.dot <= 8)
+                {
                     let mask: u16 = 0b10000000_00000000 >> self.x;
                     let pattern_low = ((self.pattern_low_shift_register & mask) > 0) as u8;
                     let pattern_high = ((self.pattern_high_shift_register & mask) > 0) as u8;
@@ -427,14 +434,16 @@ impl Ppu {
                     background = Some((color, palette));
                 }
                 let mut foreground = None;
-                if self.mask_register.get_show_sprites() {
+                if self.mask_register.get_show_sprites()
+                    && !(!self.mask_register.get_show_sprites() && self.dot <= 8)
+                {
                     for i in 0..self.sprite_limit {
                         if self.sprite_counters[i] == 0 {
                             let color_low = self.sprite_patterns_low[i] >> 7;
                             let color_high = self.sprite_patterns_high[i] >> 7;
                             if color_low != 0 || color_high != 0 {
                                 // check sprite 0 hit
-                                let color  = (color_high << 1) | color_low;
+                                let color = (color_high << 1) | color_low;
                                 let palette = self.sprite_attributes[i] & 0b11;
                                 let priority_back = (self.sprite_attributes[i] >> 5) & 1 == 1;
                                 foreground = Some((color, palette, priority_back, i));
@@ -447,29 +456,30 @@ impl Ppu {
                     if color == 0b00 {
                         nes.ppu_bus_read(0x3F00) & 0b00111111
                     } else {
-                        nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16)
-                            & 0b00111111
+                        nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16) & 0b00111111
                     }
                 };
                 let get_fg_color = |color: u8, palette: u8| {
                     if color == 0b00 {
                         nes.ppu_bus_read(0x3F10) & 0b00111111
                     } else {
-                        nes.ppu_bus_read(0x3F10 | (palette << 2) as u16 | color as u16)
-                            & 0b00111111
+                        nes.ppu_bus_read(0x3F10 | (palette << 2) as u16 | color as u16) & 0b00111111
                     }
                 };
-                let get_rgb = |color: u8| {
-                    PALLETTE[color as usize]
-                };
+                let get_rgb = |color: u8| PALLETTE[color as usize];
 
                 let rgb = match (foreground, background) {
-                    (Some((fg_color, fg_palette, fg_priority_back, sprite_index)), Some((bg_color, bg_palette))) => {
+                    (
+                        Some((fg_color, fg_palette, fg_priority_back, sprite_index)),
+                        Some((bg_color, bg_palette)),
+                    ) => {
+                        let sprite_0_hit = self.sprite_0_current_scanline
+                            && self.dot != 256
+                            && sprite_index == 0
+                            && fg_color != 0
+                            && bg_color != 0;
 
-                        let sprite_0_hit_can_occur = self.sprite_0_current_scanline;
-                        let sprite_0_hit = sprite_index == 0 && fg_color != 0 && bg_color != 0;
-
-                        if sprite_0_hit_can_occur && sprite_0_hit {
+                        if sprite_0_hit {
                             self.sprite_0_current_scanline = false;
                             self.status_register.set_sprite_0_hit_flag(true);
                         }
@@ -487,7 +497,12 @@ impl Ppu {
                         get_rgb(get_bg_color(bg_color, bg_palette))
                     }
                     (None, None) => {
-                        (0, 0, 0)
+                        let ppu_addr = self.v.get_ppu_address() & 0b00111111_11111111;
+                        if ppu_addr >= 0x3F00 {
+                            get_rgb(nes.ppu_bus_read(ppu_addr) & 0b00111111)
+                        } else {
+                            get_rgb(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                        }
                     }
                 };
                 self.buffer[self.buffer_index / 256][self.buffer_index % 256] = rgb;
@@ -562,9 +577,6 @@ impl Ppu {
                             | (self.t.get_nametable_select() & 0b01),
                     );
                 }
-            }
-            if (258..=320).contains(&self.dot) {
-                // TODO fetch sprite data
             }
             if (337..=339).contains(&self.dot) {
                 self.nametable_byte = nes.ppu_bus_read(0x2000 + (self.v.0 & 0x0FFF));
@@ -772,8 +784,7 @@ impl Ppu {
 
         if sprite_height == 16 {
             character_table = index & 1;
-            tile_offset =
-                (index & 0b11111110) | ((scanline_offset > 7) ^ flip_vertically) as u8;
+            tile_offset = (index & 0b11111110) | ((scanline_offset > 7) ^ flip_vertically) as u8;
             tile_row_number = if flip_vertically {
                 7 - (scanline_offset & 0b111)
             } else {

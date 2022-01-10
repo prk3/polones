@@ -83,9 +83,17 @@ impl Mapper for Mapper000 {
     }
 
     fn ppu_nametable_address_mapped(&self, address: u16) -> u16 {
-        // In vertical mirroring we zero bit 10
-        // In horizontal mirroring we zero bit 11
-        address & 0x2FFF & !(0b0000_0100_0000_0000 << self.game.nametable_mirroring_vertical as u8)
+        // address bits 11-8
+        // address   vertical   horizontal
+        //    00XX       00XX         00XX
+        //    01XX       01XX         00XX
+        //    10XX       00XX         01XX
+        //    10XX       01XX         01XX
+        if self.game.nametable_mirroring_vertical {
+            address & 0b0000_0111_1111_1111
+        } else {
+            (address & 0b0000_0011_1111_1111) | ((address & 0b0000_1000_0000_0000) >> 1)
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use nes_lib::*;
 
 use nes_lib::game_file::GameFile;
 use nes_lib::nes::{Display, Frame, Input, Nes, PortState};
+use nes_lib::ppu::PALLETTE;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -247,52 +248,100 @@ impl SdlGameWindow {
             Event::Quit { .. } => {
                 state.exit = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::W), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::W),
+                ..
+            } => {
                 self.gamepad_1_up = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::S), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::S),
+                ..
+            } => {
                 self.gamepad_1_down = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::A), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::A),
+                ..
+            } => {
                 self.gamepad_1_left = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::D), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::D),
+                ..
+            } => {
                 self.gamepad_1_right = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::R), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::R),
+                ..
+            } => {
                 self.gamepad_1_select = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::T), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::T),
+                ..
+            } => {
                 self.gamepad_1_start = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::F), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::F),
+                ..
+            } => {
                 self.gamepad_1_b = true;
             }
-            Event::KeyDown { keycode: _k @ Some(Keycode::G), .. } => {
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::G),
+                ..
+            } => {
                 self.gamepad_1_a = true;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::W), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::W),
+                ..
+            } => {
                 self.gamepad_1_up = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::S), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::S),
+                ..
+            } => {
                 self.gamepad_1_down = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::A), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::A),
+                ..
+            } => {
                 self.gamepad_1_left = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::D), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::D),
+                ..
+            } => {
                 self.gamepad_1_right = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::R), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::R),
+                ..
+            } => {
                 self.gamepad_1_select = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::T), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::T),
+                ..
+            } => {
                 self.gamepad_1_start = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::F), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::F),
+                ..
+            } => {
                 self.gamepad_1_b = false;
             }
-            Event::KeyUp { keycode: _k @ Some(Keycode::G), .. } => {
+            Event::KeyUp {
+                keycode: _k @ Some(Keycode::G),
+                ..
+            } => {
                 self.gamepad_1_a = false;
             }
             _ => {}
@@ -1183,9 +1232,7 @@ impl SdlMemoryDisplay {
                         0x100..=0x13F => {
                             nes.ppu_bus_read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)
                         }
-                        0x140 => {
-                            nes.ppu.borrow().oam[y as usize * 16 + x as usize]
-                        }
+                        0x140 => nes.ppu.borrow().oam[y as usize * 16 + x as usize],
                         _ => unreachable!(),
                     },
                     3 + y * 2,
@@ -1211,12 +1258,8 @@ impl SdlMemoryDisplay {
             let pc = nes.cpu.borrow().program_counter;
             let y = pc as u8 >> 4;
             let x = pc as u8 & 0x0F;
-            self.text_area.write_u8_with_color(
-                nes.cpu_bus_read(pc),
-                3 + y * 2,
-                1 + x * 3,
-                Red,
-            );
+            self.text_area
+                .write_u8_with_color(nes.cpu_bus_read(pc), 3 + y * 2, 1 + x * 3, Red);
         }
 
         if self.page == 0x140 {
@@ -1373,9 +1416,19 @@ impl SdlPpuDebugDisplay {
 
         ta.write_str_with_color("SCROLL", 0, 14, Yellow);
         ta.write_str_with_color("H", 0, 21, Yellow);
-        ta.write_u8_with_color(ppu.horizontal_scroll, 0, 23, if ppu.w { White } else { Magenta });
+        ta.write_u8_with_color(
+            ppu.horizontal_scroll,
+            0,
+            23,
+            if ppu.w { White } else { Magenta },
+        );
         ta.write_str_with_color("V", 1, 21, Yellow);
-        ta.write_u8_with_color(ppu.vertical_scroll, 1, 23, if ppu.w { Magenta } else { White });
+        ta.write_u8_with_color(
+            ppu.vertical_scroll,
+            1,
+            23,
+            if ppu.w { Magenta } else { White },
+        );
 
         ta.write_str_with_color("CTRL", 3, 2, Yellow);
 
@@ -1453,8 +1506,18 @@ impl SdlPpuDebugDisplay {
         ta.write_u8_with_color(ppu.oam_address, 8, 27, White);
 
         ta.write_str_with_color("PPU ADDR", 9, 18, Yellow);
-        ta.write_u8_with_color((ppu.t.get_ppu_address() >> 8) as u8, 9, 27, if ppu.w { White } else { Magenta });
-        ta.write_u8_with_color(ppu.t.get_ppu_address() as u8, 9, 29, if ppu.w { Magenta } else { White });
+        ta.write_u8_with_color(
+            (ppu.t.get_ppu_address() >> 8) as u8,
+            9,
+            27,
+            if ppu.w { White } else { Magenta },
+        );
+        ta.write_u8_with_color(
+            ppu.t.get_ppu_address() as u8,
+            9,
+            29,
+            if ppu.w { Magenta } else { White },
+        );
 
         self.texture
             .with_lock(None, |data, _pitch| {
@@ -1487,6 +1550,153 @@ impl SdlPpuDebugDisplay {
                 ..
             } => {
                 state.exit = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+struct SdlVramDebugDisplay {
+    canvas: sdl2::render::WindowCanvas,
+    _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
+    texture: sdl2::render::Texture<'static>,
+    palette: bool,
+}
+
+impl SdlVramDebugDisplay {
+    const WIDTH: u32 = 512;
+    const HEIGHT: u32 = 480;
+}
+
+impl SdlVramDebugDisplay {
+    fn new(canvas: sdl2::render::WindowCanvas) -> Self {
+        let mut canvas = canvas;
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
+        let texture_creator = Rc::new(canvas.texture_creator());
+        let texture = texture_creator
+            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
+            .unwrap();
+        canvas.clear();
+        canvas.present();
+        Self {
+            canvas,
+            texture: unsafe { std::mem::transmute(texture) },
+            _texture_creator: texture_creator,
+            palette: true,
+        }
+    }
+
+    fn display(&mut self, nes: &Nes) {
+        let color = |c: u8| match c {
+            0 => 0,
+            1 => 75,
+            2 => 170,
+            3 => 255,
+            _ => unreachable!(),
+        };
+        let nt = nes.ppu.borrow().control_register.get_background_tile_select() as u16;
+
+        self.texture
+            .with_lock(None, |data, _| {
+                for yn in 0..2usize {
+                    for xn in 0..2usize {
+                        for yc in 0..30usize {
+                            for yf in 0..8usize {
+                                for xc in 0..32usize {
+                                    let index = nes.ppu_bus_read(
+                                        (0x2000 + yn * 0x0800 + xn * 0x0400 + yc * 32 + xc) as u16,
+                                    );
+                                    let mut low = nes.ppu_bus_read(
+                                        (nt << 12)
+                                            | (index as u16 >> 0 << 4)
+                                            | (0b0000)
+                                            | (yf as u16),
+                                    );
+                                    let mut high = nes.ppu_bus_read(
+                                        (nt << 12)
+                                            | (index as u16 >> 0 << 4)
+                                            | (0b1000)
+                                            | (yf as u16),
+                                    );
+
+                                    let attribute_byte = nes.ppu_bus_read((
+                                        (0x23C0 + yn * 0x0800 + xn * 0x0400)
+                                            | (yc >> 2 << 3)
+                                            | (xc >> 2))
+                                            as u16,
+                                    );
+                                    let attribute =
+                                        (attribute_byte >> ((yc & 2) << 1) >> (xc & 2)) & 0b11;
+
+                                    for xf in 0..8 {
+                                        let i: usize = xn * 256
+                                            + yn * 512 * 240
+                                            + yc * 512 * 8
+                                            + yf * 512
+                                            + xc * 8
+                                            + xf;
+
+                                        let (r, g, b) = if self.palette {
+                                            if ((high >> 7 << 1) | low >> 7) == 0 {
+                                                PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                                                    as usize]
+                                            } else {
+                                                let b = nes.ppu_bus_read(
+                                                    0x3F00
+                                                        + ((attribute as u16) << 2)
+                                                        + (((high as u16) >> 7 << 1) | low as u16 >> 7)
+                                                ) & 0b00111111;
+                                                PALLETTE[b as usize]
+                                            }
+                                        } else {
+                                            let t = color((high >> 7 << 1) | (low >> 7));
+                                            (t, t, t)
+                                        };
+                                        data[i * 4 + 0] = b;
+                                        data[i * 4 + 1] = g;
+                                        data[i * 4 + 2] = r;
+                                        high <<= 1;
+                                        low <<= 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap();
+
+        self.canvas
+            .copy(
+                &self.texture,
+                Rect::new(0, 0, Self::WIDTH, Self::HEIGHT),
+                Rect::new(
+                    0,
+                    0,
+                    self.canvas.window().size().0,
+                    self.canvas.window().size().1,
+                ),
+            )
+            .unwrap();
+        self.canvas.present();
+    }
+
+    fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
+        match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Escape),
+                ..
+            } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::P),
+                ..
+            } => {
+                self.palette = !self.palette;
             }
             _ => {}
         }
@@ -1555,12 +1765,25 @@ fn main() {
     let memory_window_id = memory_window.id();
     let memory_canvas = memory_window.into_canvas().build().unwrap();
 
+    let vram_window = video_subsystem
+        .window(
+            "nes vram",
+            SdlVramDebugDisplay::WIDTH * 2,
+            SdlVramDebugDisplay::HEIGHT * 2,
+        )
+        .position(0, 1)
+        .build()
+        .unwrap();
+    let vram_window_id = vram_window.id();
+    let vram_canvas = vram_window.into_canvas().build().unwrap();
+
     let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
     let display = SdlDisplay::new(game_window.clone());
     let input = SdlInput::new(game_window.clone());
     let mut debug_display = SdlDebugDisplay::new(debug_canvas);
     let mut memory_display = SdlMemoryDisplay::new(memory_canvas);
     let mut ppu_debug_display = SdlPpuDebugDisplay::new(ppu_debug_canvas);
+    let mut vram_window = SdlVramDebugDisplay::new(vram_canvas);
     let mut nes = Nes::new(game_file, display, input).expect("Could not start the game");
 
     let mut state = EmulatorState {
@@ -1576,6 +1799,7 @@ fn main() {
     memory_display.update(&nes);
     memory_display.show(&nes);
     ppu_debug_display.display(&nes);
+    vram_window.display(&nes);
 
     let mut i = 0;
 
@@ -1584,13 +1808,17 @@ fn main() {
 
         for event in event_pump.poll_iter() {
             if event.get_window_id() == Some(game_window_id) {
-                game_window.borrow_mut().handle_event(event, &nes, &mut state);
+                game_window
+                    .borrow_mut()
+                    .handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(memory_window_id) {
                 memory_display.handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(debug_window_id) {
                 debug_display.handle_event(event, &nes, &mut state);
             } else if event.get_window_id() == Some(ppu_debug_window_id) {
                 ppu_debug_display.handle_event(event, &nes, &mut state);
+            } else if event.get_window_id() == Some(vram_window_id) {
+                vram_window.handle_event(event, &nes, &mut state);
             }
         }
 
@@ -1627,6 +1855,7 @@ fn main() {
         debug_display.show(&nes);
         memory_display.show(&nes);
         ppu_debug_display.display(&nes);
+        vram_window.display(&nes);
 
         // 60fps
         let nanos_to_sleep =

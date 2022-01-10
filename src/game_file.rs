@@ -154,7 +154,7 @@ impl GameFile {
 
             let mapper_number_nybble_2 = data[7] >> 4;
 
-            mapper = (mapper_number_nybble_2 as u16) << 4 | mapper_number_nybble_2 as u16;
+            mapper = (mapper_number_nybble_2 as u16) << 4 | mapper_number_nybble_1 as u16;
 
             prg_rom = {
                 let prg_rom_size = prg_rom_size_lsb as usize * 16384;

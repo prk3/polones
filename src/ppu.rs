@@ -512,7 +512,7 @@ impl Ppu {
             if (1..=256).contains(&self.dot) || (321..=336).contains(&self.dot) {
                 match (self.dot - 1) % 8 {
                     0 => {
-                        self.nametable_byte = nes.ppu_bus_read(0x2000 + (self.v.0 & 0x0FFF));
+                        self.nametable_byte = nes.ppu_bus_read(0x2000 | (self.v.0 & 0x0FFF));
                     }
                     2 => {
                         // NN 1111 YYY XXX
@@ -557,13 +557,13 @@ impl Ppu {
                     }
                     7 if self.dot != 256 => {
                         if self.is_rendering_enabled() {
-                            self.increment_horizontal();
+                            self.increment_v_horizontal();
                         }
                     }
                     7 if self.dot == 256 => {
                         if self.is_rendering_enabled() {
-                            self.increment_horizontal();
-                            self.increment_vertical();
+                            self.increment_v_horizontal();
+                            self.increment_v_vertical();
                         }
                     }
                     _ => {}
@@ -724,35 +724,31 @@ impl Ppu {
         self.mask_register.get_show_sprites() || self.mask_register.get_show_background()
     }
 
-    fn increment_horizontal(&mut self) {
-        if self.mask_register.get_show_background() || self.mask_register.get_show_sprites() {
-            if self.v.get_coarse_x_scroll() == 31 {
-                self.v.set_coarse_x_scroll(0);
-                self.v
-                    .set_nametable_select(self.v.get_nametable_select() ^ 0b01);
-            } else {
-                self.v.set_coarse_x_scroll(self.v.get_coarse_x_scroll() + 1);
-            }
+    fn increment_v_horizontal(&mut self) {
+        if self.v.get_coarse_x_scroll() == 31 {
+            self.v.set_coarse_x_scroll(0);
+            self.v
+                .set_nametable_select(self.v.get_nametable_select() ^ 0b01);
+        } else {
+            self.v.set_coarse_x_scroll(self.v.get_coarse_x_scroll() + 1);
         }
     }
 
-    fn increment_vertical(&mut self) {
-        if self.mask_register.get_show_background() || self.mask_register.get_show_sprites() {
-            if self.v.get_fine_y_scroll() < 7 {
-                self.v.set_fine_y_scroll(self.v.get_fine_y_scroll() + 1);
-            } else {
-                self.v.set_fine_y_scroll(0);
-                match self.v.get_coarse_y_scroll() {
-                    29 => {
-                        self.v.set_coarse_y_scroll(0);
-                        self.v
-                            .set_nametable_select(self.v.get_nametable_select() ^ 0b10);
-                    }
-                    31 => {
-                        self.v.set_coarse_y_scroll(0);
-                    }
-                    other => self.v.set_coarse_y_scroll(other + 1),
+    fn increment_v_vertical(&mut self) {
+        if self.v.get_fine_y_scroll() < 7 {
+            self.v.set_fine_y_scroll(self.v.get_fine_y_scroll() + 1);
+        } else {
+            self.v.set_fine_y_scroll(0);
+            match self.v.get_coarse_y_scroll() {
+                29 => {
+                    self.v.set_coarse_y_scroll(0);
+                    self.v
+                        .set_nametable_select(self.v.get_nametable_select() ^ 0b10);
                 }
+                31 => {
+                    self.v.set_coarse_y_scroll(0);
+                }
+                other => self.v.set_coarse_y_scroll(other + 1),
             }
         }
     }

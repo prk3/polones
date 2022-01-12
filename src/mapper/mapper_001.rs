@@ -2,12 +2,12 @@ use crate::game_file::GameFile;
 
 use super::Mapper;
 
-pub struct Mapper000 {
+pub struct Mapper001 {
     game: GameFile,
     // has_ram: bool,
 }
 
-impl Mapper for Mapper000 {
+impl Mapper for Mapper001 {
     fn from_game(game: GameFile) -> Result<Self, &'static str> {
         if game.mapper != 0 {
             return Err("Mapper 000: Unexpected mapper");
@@ -95,29 +95,4 @@ impl Mapper for Mapper000 {
             (address & 0b0000_0011_1111_1111) | ((address & 0b0000_1000_0000_0000) >> 1)
         }
     }
-}
-
-
-#[test]
-fn test_nametable_address_mapping() {
-    let dk = include_bytes!("../../tests/roms/dk.nes").to_vec();
-    let mut game = GameFile::read("dk".into(), dk.clone()).unwrap();
-    game.nametable_mirroring_vertical = true;
-    let mapper = Mapper000::from_game(game).unwrap();
-
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2000));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2400));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2800));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2C00));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x3000));
-
-    let mut game = GameFile::read("donkey kong".into(), dk).unwrap();
-    game.nametable_mirroring_vertical = false;
-    let mapper = Mapper000::from_game(game).unwrap();
-
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2000));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2400));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2800));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2C00));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x3000));
 }

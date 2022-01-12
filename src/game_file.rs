@@ -7,6 +7,10 @@ pub struct GameFile {
     trainer: Option<(usize, usize)>,
     prg_rom: (usize, usize),
     chr_rom: (usize, usize),
+    pub prg_ram_size: usize,
+    pub prg_nvram_size: usize,
+    pub chr_ram_size: usize,
+    pub chr_nvram_size: usize,
     misc_rom: Option<(usize, usize)>,
 }
 
@@ -80,6 +84,10 @@ impl GameFile {
         let format: FileFormat;
         let prg_rom: (usize, usize);
         let chr_rom: (usize, usize);
+        let prg_ram_size: usize;
+        let prg_nvram_size: usize;
+        let chr_ram_size: usize;
+        let chr_nvram_size: usize;
         let mapper: u16;
         let mut misc_rom: Option<(usize, usize)> = None;
 
@@ -96,12 +104,17 @@ impl GameFile {
             let submapper_number = data[8] >> 4;
             let mapper_number_nybble_3 = data[8] & 0b00001111;
 
-            let non_volatile_shift_count = data[10] >> 4;
-            let volatile_shift_count = data[10] & 0b00001111;
+            let prg_nvram_size_shift = data[10] >> 4;
+            let prg_ram_size_shift = data[10] & 0b00001111;
 
-            let chr_ram_size_shift = data[11] >> 4;
-            let chr_nvram_size_shift = data[11] & 0b00001111;
+            let chr_nvram_size_shift = data[11] >> 4;
+            let chr_ram_size_shift = data[11] & 0b00001111;
+
             let cpu_ppu_timing_mode = data[12] & 0b00000011;
+
+            if chr_nvram_size_shift > 0 && !battery_present {
+                return Err(());
+            }
 
             let hardware_type = if console_type == 1 {
                 Some(data[13] >> 4)
@@ -140,6 +153,27 @@ impl GameFile {
                 (start, read)
             };
 
+            prg_nvram_size = if prg_nvram_size_shift > 0 {
+                64 << prg_nvram_size_shift
+            } else {
+                0
+            };
+            prg_ram_size = if prg_ram_size_shift > 0 {
+                64 << prg_ram_size_shift
+            } else {
+                0
+            };
+            chr_nvram_size = if chr_nvram_size_shift > 0 {
+                64 << chr_nvram_size_shift
+            } else {
+                0
+            };
+            chr_ram_size = if chr_ram_size_shift > 0 {
+                64 << chr_ram_size_shift
+            } else {
+                0
+            };
+
             misc_rom = if miscellaneous_roms_number > 0 {
                 let start = read;
                 let size = data.len() - read;
@@ -172,6 +206,11 @@ impl GameFile {
                 (start, read)
             };
 
+            prg_nvram_size = 0;
+            prg_ram_size = 0;
+            chr_nvram_size = 0;
+            chr_ram_size = 0;
+
             // TODO read other flags too
         } else {
             // Archaic iNES
@@ -193,6 +232,11 @@ impl GameFile {
                 read += chr_rom_size;
                 (start, read)
             };
+
+            prg_nvram_size = 0;
+            prg_ram_size = 0;
+            chr_nvram_size = 0;
+            chr_ram_size = 0;
         };
 
         Ok(Self {
@@ -203,6 +247,10 @@ impl GameFile {
             trainer,
             prg_rom,
             chr_rom,
+            prg_nvram_size,
+            prg_ram_size,
+            chr_nvram_size,
+            chr_ram_size,
             misc_rom,
             nametable_mirroring_vertical,
         })

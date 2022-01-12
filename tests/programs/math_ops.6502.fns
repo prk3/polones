@@ -1,2 +1,0 @@
-; math_ops.6502.asm
-main                             = $E000

@@ -1,17 +1,20 @@
 pub struct GameFile {
-    name: String,
+    pub name: String,
     data: Vec<u8>,
     pub format: FileFormat,
     pub mapper: u16,
-    pub nametable_mirroring_vertical: bool,
+    pub submapper: Option<u8>,
     trainer: Option<(usize, usize)>,
     prg_rom: (usize, usize),
-    chr_rom: (usize, usize),
-    pub prg_ram_size: usize,
-    pub prg_nvram_size: usize,
-    pub chr_ram_size: usize,
-    pub chr_nvram_size: usize,
-    misc_rom: Option<(usize, usize)>,
+    chr_rom: Option<(usize, usize)>,
+    pub mirroring_vertical: bool,
+    pub battery_present: bool,
+    pub four_screen_mode: bool,
+
+    pub prg_ram_size: Option<usize>,
+    pub prg_nvram_size: Option<usize>,
+    pub chr_ram_size: Option<usize>,
+    pub chr_nvram_size: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -45,10 +48,10 @@ impl GameFile {
         let prg_rom_size_lsb = data[4];
         let chr_rom_size_lsb = data[5];
         let mapper_number_nybble_1 = data[6] >> 4;
-        let hard_wired_four_screen_mode = data[6] & 0b1000 > 0;
+        let four_screen_mode = data[6] & 0b1000 > 0;
         let trainer_present = data[6] & 0b0100 > 0;
         let battery_present = data[6] & 0b0010 > 0;
-        let nametable_mirroring_vertical = data[6] & 0b0001 > 0;
+        let mirroring_vertical = data[6] & 0b0001 > 0;
 
         let trainer = if trainer_present {
             let start = read;
@@ -65,7 +68,7 @@ impl GameFile {
         let prg_rom_size_msb = data[9] & 0b00001111;
 
         // Calculate NES 2.0 rom sizes.
-        let prg_size = if prg_rom_size_msb < 0xf {
+        let prg_rom_size = if prg_rom_size_msb < 0xf {
             ((prg_rom_size_msb as usize) << 8 | prg_rom_size_lsb as usize) * 16384
         } else {
             let multiplier = (prg_rom_size_lsb & 0b00000011) * 2 + 1;
@@ -73,7 +76,7 @@ impl GameFile {
             2usize.pow(exponent as u32) * multiplier as usize
         };
 
-        let chr_size = if chr_rom_size_msb < 0xf {
+        let chr_rom_size = if chr_rom_size_msb < 0xf {
             ((chr_rom_size_msb as usize) << 8 | chr_rom_size_lsb as usize) * 8192
         } else {
             let multiplier = (chr_rom_size_lsb & 0b00000011) * 2 + 1;
@@ -82,26 +85,28 @@ impl GameFile {
         };
 
         let format: FileFormat;
-        let prg_rom: (usize, usize);
-        let chr_rom: (usize, usize);
-        let prg_ram_size: usize;
-        let prg_nvram_size: usize;
-        let chr_ram_size: usize;
-        let chr_nvram_size: usize;
         let mapper: u16;
-        let mut misc_rom: Option<(usize, usize)> = None;
+        let prg_rom: (usize, usize);
+        let chr_rom: Option<(usize, usize)>;
+        let mut prg_ram_size: Option<usize> = None;
+        let mut prg_nvram_size: Option<usize> = None;
+        let mut chr_ram_size: Option<usize> = None;
+        let mut chr_nvram_size: Option<usize> = None;
+        let mut submapper: Option<u8> = None;
 
         // Now we have enough data to decide which format we're dealing with.
         // If it's not NES 2.0, we'll reinterpret byte 9.
-        if data[7] & 0b00001100 == 0b00001000
-            && data.len() >= (16 + (trainer_present as usize * 512) + prg_size + chr_size)
+        if data[7] & 0b1100 == 0b1000
+            && data.len() >= (16 + (trainer_present as usize * 512) + prg_rom_size + chr_rom_size)
         {
             // NES 2.0
             format = FileFormat::Nes20;
 
             let mapper_number_nybble_2 = data[7] >> 4;
             let console_type = data[7] & 0b00000011;
-            let submapper_number = data[8] >> 4;
+
+            submapper = Some(data[8] >> 4);
+
             let mapper_number_nybble_3 = data[8] & 0b00001111;
 
             let prg_nvram_size_shift = data[10] >> 4;
@@ -141,48 +146,41 @@ impl GameFile {
 
             prg_rom = {
                 let start = read;
-                assert_has_bytes(read + prg_size)?;
-                read += prg_size;
+                assert_has_bytes(read + prg_rom_size)?;
+                read += prg_rom_size;
                 (start, read)
             };
 
-            chr_rom = {
+            chr_rom = if chr_rom_size > 0 {
                 let start = read;
-                assert_has_bytes(read + chr_size)?;
-                read += chr_size;
-                (start, read)
-            };
-
-            prg_nvram_size = if prg_nvram_size_shift > 0 {
-                64 << prg_nvram_size_shift
-            } else {
-                0
-            };
-            prg_ram_size = if prg_ram_size_shift > 0 {
-                64 << prg_ram_size_shift
-            } else {
-                0
-            };
-            chr_nvram_size = if chr_nvram_size_shift > 0 {
-                64 << chr_nvram_size_shift
-            } else {
-                0
-            };
-            chr_ram_size = if chr_ram_size_shift > 0 {
-                64 << chr_ram_size_shift
-            } else {
-                0
-            };
-
-            misc_rom = if miscellaneous_roms_number > 0 {
-                let start = read;
-                let size = data.len() - read;
-                read += size;
+                assert_has_bytes(read + chr_rom_size)?;
+                read += chr_rom_size;
                 Some((start, read))
             } else {
                 None
-            }
-        } else if data[7] & 0b00001100 == 0b00000000 && data[12..=15].iter().all(|b| *b == 0) {
+            };
+
+            prg_nvram_size = if prg_nvram_size_shift > 0 {
+                Some(64 << prg_nvram_size_shift)
+            } else {
+                None
+            };
+            prg_ram_size = if prg_ram_size_shift > 0 {
+                Some(64 << prg_ram_size_shift)
+            } else {
+                None
+            };
+            chr_nvram_size = if chr_nvram_size_shift > 0 {
+                Some(64 << chr_nvram_size_shift)
+            } else {
+                None
+            };
+            chr_ram_size = if chr_ram_size_shift > 0 {
+                Some(64 << chr_ram_size_shift)
+            } else {
+                None
+            };
+        } else if data[7] & 0b1100 == 0 && data[12..=15].iter().all(|b| *b == 0) {
             // iNES
             format = FileFormat::INes;
 
@@ -198,20 +196,15 @@ impl GameFile {
                 (start, read)
             };
 
-            chr_rom = {
+            chr_rom = if chr_rom_size_lsb > 0 {
                 let chr_rom_size = chr_rom_size_lsb as usize * 8192;
                 let start = read;
                 assert_has_bytes(read + chr_rom_size)?;
                 read += chr_rom_size;
-                (start, read)
+                Some((start, read))
+            } else {
+                None
             };
-
-            prg_nvram_size = 0;
-            prg_ram_size = 0;
-            chr_nvram_size = 0;
-            chr_ram_size = 0;
-
-            // TODO read other flags too
         } else {
             // Archaic iNES
             format = FileFormat::ArchaicINes;
@@ -225,18 +218,15 @@ impl GameFile {
                 (start, read)
             };
 
-            chr_rom = {
+            chr_rom = if chr_rom_size_lsb > 0 {
                 let chr_rom_size = chr_rom_size_lsb as usize * 8192;
                 let start = read;
                 assert_has_bytes(read + chr_rom_size)?;
                 read += chr_rom_size;
-                (start, read)
+                Some((start, read))
+            } else {
+                None
             };
-
-            prg_nvram_size = 0;
-            prg_ram_size = 0;
-            chr_nvram_size = 0;
-            chr_ram_size = 0;
         };
 
         Ok(Self {
@@ -244,6 +234,7 @@ impl GameFile {
             data,
             format,
             mapper,
+            submapper,
             trainer,
             prg_rom,
             chr_rom,
@@ -251,8 +242,9 @@ impl GameFile {
             prg_ram_size,
             chr_nvram_size,
             chr_ram_size,
-            misc_rom,
-            nametable_mirroring_vertical,
+            four_screen_mode,
+            battery_present,
+            mirroring_vertical,
         })
     }
 
@@ -264,11 +256,7 @@ impl GameFile {
         &self.data[self.prg_rom.0..self.prg_rom.1]
     }
 
-    pub fn chr_rom(&self) -> &[u8] {
-        &self.data[self.chr_rom.0..self.chr_rom.1]
-    }
-
-    pub fn misc_rom(&self) -> Option<&[u8]> {
-        self.misc_rom.map(|(start, end)| &self.data[start..end])
+    pub fn chr_rom(&self) -> Option<&[u8]> {
+        self.chr_rom.map(|chr_rom| &self.data[chr_rom.0..chr_rom.1])
     }
 }

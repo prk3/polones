@@ -2,6 +2,7 @@ use crate::game_file::GameFile;
 
 mod mapper_000;
 mod mapper_001;
+mod mapper_002;
 
 pub trait Mapper {
     fn from_game(game: GameFile) -> Result<Self, &'static str>
@@ -17,9 +18,11 @@ pub trait Mapper {
 }
 
 pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper>, &'static str> {
-    match game.mapper {
-        0 => mapper_000::Mapper000::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>),
-        1 => mapper_001::Mapper001::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>),
+    match (game.mapper, game.submapper) {
+        (0, _) => mapper_000::Mapper000::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>),
+        (1, Some(5)) => Err("unsupported mapper"), // todo mapper 155
+        (1, _) => mapper_001::Mapper001::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>),
+        (2, _) => mapper_002::Mapper002::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>),
         _ => Err("unsupported mapper"),
     }
 }

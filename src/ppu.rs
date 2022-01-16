@@ -756,6 +756,7 @@ impl Ppu {
     fn set_oam_pattern(&mut self, nes: &Nes, sprite_number: usize, pattern_high: bool) {
         let y = self.sprite_secondary_oam[sprite_number * 4 + 0] as u16;
         let index = self.sprite_secondary_oam[sprite_number * 4 + 1];
+        let x = self.sprite_secondary_oam[sprite_number * 4 + 3];
         let attributes = self.sprite_secondary_oam[sprite_number * 4 + 2];
         let flip_horizontally = attributes & 0b01000000 > 0;
         let flip_vertically = attributes & 0b10000000 > 0;
@@ -773,20 +774,16 @@ impl Ppu {
             return;
         }
 
+        if y < 240 {
+            let a =  0;
+        }
+
         let scanline_offset = self.scanline - y;
         let character_table;
         let tile_offset;
         let tile_row_number;
 
-        if sprite_height == 16 {
-            character_table = index & 1;
-            tile_offset = (index & 0b11111110) | ((scanline_offset > 7) ^ flip_vertically) as u8;
-            tile_row_number = if flip_vertically {
-                7 - (scanline_offset & 0b111)
-            } else {
-                scanline_offset & 0b111
-            };
-        } else {
+        if sprite_height == 8 {
             character_table = self.control_register.get_sprite_tile_select() as u8;
             tile_offset = index;
             tile_row_number = if flip_vertically {
@@ -794,7 +791,17 @@ impl Ppu {
             } else {
                 scanline_offset
             }
+        } else {
+            character_table = index & 1;
+            if flip_vertically {
+                tile_offset = (index & 0b11111110) | (((scanline_offset >> 3) as u8) ^ 1);
+                tile_row_number = 7 - (scanline_offset & 0b111);
+            } else {
+                tile_offset = (index & 0b11111110) | (scanline_offset >> 3) as u8;
+                tile_row_number = scanline_offset & 0b111;
+            }
         };
+
         // 0HRRRR CCCCPTTT
         // |||||| |||||+++- T: Fine Y offset, the row number within a tile
         // |||||| ||||+---- P: Bit plane (0: "lower"; 1: "upper")
@@ -805,7 +812,6 @@ impl Ppu {
         let tile_row = nes.ppu_bus_read(
             (character_table as u16) << 12
                 | (tile_offset as u16) << 4
-                | (index as u16) << 4
                 | (pattern_high as u16) << 3
                 | tile_row_number,
         );

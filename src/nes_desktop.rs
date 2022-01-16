@@ -1,5 +1,3 @@
-use nes_lib::*;
-
 use nes_lib::game_file::GameFile;
 use nes_lib::nes::{Display, Frame, Input, Nes, PortState};
 use nes_lib::ppu::PALLETTE;
@@ -614,7 +612,7 @@ impl Operation {
     }
 }
 
-struct SdlDebugDisplay {
+struct SdlCpuDebugger {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
@@ -627,7 +625,7 @@ struct SdlDebugDisplay {
     disassembly: [DisassemblyValue; 1 << 16],
 }
 
-impl SdlDebugDisplay {
+impl SdlCpuDebugger {
     const WIDTH: u32 = 256;
     const HEIGHT: u32 = 240;
 
@@ -1140,7 +1138,7 @@ fn deserialize_breakpoints(string: String) -> Vec<u16> {
         .collect()
 }
 
-struct SdlMemoryDisplay {
+struct SdlMemoryDebugger {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
@@ -1148,7 +1146,7 @@ struct SdlMemoryDisplay {
     page: u16,
 }
 
-impl SdlMemoryDisplay {
+impl SdlMemoryDebugger {
     const WIDTH: u32 = 384;
     const HEIGHT: u32 = 360;
 
@@ -1177,8 +1175,6 @@ impl SdlMemoryDisplay {
             page: 0,
         }
     }
-
-    fn update(&mut self, nes: &Nes) {}
 
     fn show(&mut self, nes: &Nes) {
         let ta = &mut self.text_area;
@@ -1372,19 +1368,19 @@ fn increase_in_ranges(ranges: &[RangeInclusive<u16>], value: u16) -> u16 {
     value
 }
 
-struct SdlPpuDebugDisplay {
+struct SdlPpuDebugger {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
 }
 
-impl SdlPpuDebugDisplay {
+impl SdlPpuDebugger {
     const WIDTH: u32 = 256;
     const HEIGHT: u32 = 240;
 }
 
-impl SdlPpuDebugDisplay {
+impl SdlPpuDebugger {
     fn new(canvas: sdl2::render::WindowCanvas) -> Self {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
@@ -1556,19 +1552,21 @@ impl SdlPpuDebugDisplay {
     }
 }
 
-struct SdlVramDebugDisplay {
+struct SdlGraphicsDebugger {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
-    palette: bool,
+    mode: u8,
+    grid: bool,
+    pattern_palette: u8,
 }
 
-impl SdlVramDebugDisplay {
+impl SdlGraphicsDebugger {
     const WIDTH: u32 = 512;
-    const HEIGHT: u32 = 480;
+    const HEIGHT: u32 = 512;
 }
 
-impl SdlVramDebugDisplay {
+impl SdlGraphicsDebugger {
     fn new(canvas: sdl2::render::WindowCanvas) -> Self {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
@@ -1582,89 +1580,363 @@ impl SdlVramDebugDisplay {
             canvas,
             texture: unsafe { std::mem::transmute(texture) },
             _texture_creator: texture_creator,
-            palette: true,
+            mode: 1,
+            pattern_palette: 0,
+            grid: false,
         }
     }
 
     fn display(&mut self, nes: &Nes) {
-        let color = |c: u8| match c {
-            0 => 0,
-            1 => 75,
-            2 => 170,
-            3 => 255,
-            _ => unreachable!(),
-        };
-        let nt = nes.ppu.borrow().control_register.get_background_tile_select() as u16;
+        if self.mode == 1 || self.mode == 2 {
+            let nt = nes
+                .ppu
+                .borrow()
+                .control_register
+                .get_background_tile_select() as u16;
 
-        self.texture
-            .with_lock(None, |data, _| {
-                for yn in 0..2usize {
-                    for xn in 0..2usize {
-                        for yc in 0..30usize {
-                            for yf in 0..8usize {
-                                for xc in 0..32usize {
-                                    let index = nes.ppu_bus_read(
-                                        (0x2000 + yn * 0x0800 + xn * 0x0400 + yc * 32 + xc) as u16,
-                                    );
+            self.texture
+                .with_lock(None, |data, _| {
+                    // draw background from 4 nametables
+                    for yn in 0..2usize {
+                        for xn in 0..2usize {
+                            for yc in 0..30usize {
+                                for yf in 0..8usize {
+                                    for xc in 0..32usize {
+                                        let index = nes.ppu_bus_read(
+                                            (0x2000 + yn * 0x0800 + xn * 0x0400 + yc * 32 + xc)
+                                                as u16,
+                                        );
+                                        let mut low = nes.ppu_bus_read(
+                                            (nt << 12)
+                                                | (index as u16 >> 0 << 4)
+                                                | (0b0000)
+                                                | (yf as u16),
+                                        );
+                                        let mut high = nes.ppu_bus_read(
+                                            (nt << 12)
+                                                | (index as u16 >> 0 << 4)
+                                                | (0b1000)
+                                                | (yf as u16),
+                                        );
+
+                                        let attribute_byte = nes.ppu_bus_read(
+                                            ((0x23C0 + yn * 0x0800 + xn * 0x0400)
+                                                | (yc >> 2 << 3)
+                                                | (xc >> 2))
+                                                as u16,
+                                        );
+                                        let attribute =
+                                            (attribute_byte >> ((yc & 2) << 1) >> (xc & 2)) & 0b11;
+
+                                        for xf in 0..8 {
+                                            let i: usize = xn * 256
+                                                + yn * 512 * 240
+                                                + yc * 512 * 8
+                                                + yf * 512
+                                                + xc * 8
+                                                + xf;
+
+                                            let (r, g, b) = if self.mode == 1 {
+                                                if ((high >> 7 << 1) | low >> 7) == 0 {
+                                                    PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                                                        as usize]
+                                                } else {
+                                                    let b = nes.ppu_bus_read(
+                                                        0x3F00
+                                                            + ((attribute as u16) << 2)
+                                                            + (((high as u16) >> 7 << 1)
+                                                                | low as u16 >> 7),
+                                                    ) & 0b00111111;
+                                                    PALLETTE[b as usize]
+                                                }
+                                            } else {
+                                                match (high >> 7 << 1) | (low >> 7) {
+                                                    0 => (0, 0, 0),
+                                                    1 => (75, 75, 75),
+                                                    2 => (170, 170, 170),
+                                                    3 => (255, 255, 255),
+                                                    _ => unreachable!(),
+                                                }
+                                            };
+                                            data[i * 4 + 0] = b;
+                                            data[i * 4 + 1] = g;
+                                            data[i * 4 + 2] = r;
+                                            high <<= 1;
+                                            low <<= 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // clear the remaining screen space
+                    for byte in data[(240 * 2 * 512 * 4)..].iter_mut() {
+                        *byte = 0;
+                    }
+                })
+                .unwrap();
+        } else if self.mode == 3 || self.mode == 4 {
+            self.texture
+                .with_lock(None, |data, _pitch| {
+                    // draw sprites from both pattern tables
+                    // color is specified by self.pattern_palette
+                    for pt in 0..2usize {
+                        for yc in 0..16usize {
+                            for xc in 0..16usize {
+                                for yf in 0..8usize {
                                     let mut low = nes.ppu_bus_read(
-                                        (nt << 12)
-                                            | (index as u16 >> 0 << 4)
-                                            | (0b0000)
-                                            | (yf as u16),
+                                        ((pt << 12) | (yc << 8) | (xc << 4) | (0b0000) | yf) as u16,
                                     );
                                     let mut high = nes.ppu_bus_read(
-                                        (nt << 12)
-                                            | (index as u16 >> 0 << 4)
-                                            | (0b1000)
-                                            | (yf as u16),
+                                        ((pt << 12) | (yc << 8) | (xc << 4) | (0b1000) | yf) as u16,
                                     );
-
-                                    let attribute_byte = nes.ppu_bus_read((
-                                        (0x23C0 + yn * 0x0800 + xn * 0x0400)
-                                            | (yc >> 2 << 3)
-                                            | (xc >> 2))
-                                            as u16,
-                                    );
-                                    let attribute =
-                                        (attribute_byte >> ((yc & 2) << 1) >> (xc & 2)) & 0b11;
-
                                     for xf in 0..8 {
-                                        let i: usize = xn * 256
-                                            + yn * 512 * 240
-                                            + yc * 512 * 8
-                                            + yf * 512
-                                            + xc * 8
-                                            + xf;
+                                        let i: usize = pt * 256
+                                            + yc * 512 * 8 * 2
+                                            + yf * 512 * 2
+                                            + xc * 8 * 2
+                                            + xf * 2;
 
-                                        let (r, g, b) = if self.palette {
+                                        let (r, g, b) = if self.mode == 3 {
                                             if ((high >> 7 << 1) | low >> 7) == 0 {
                                                 PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111)
                                                     as usize]
                                             } else {
                                                 let b = nes.ppu_bus_read(
                                                     0x3F00
-                                                        + ((attribute as u16) << 2)
-                                                        + (((high as u16) >> 7 << 1) | low as u16 >> 7)
+                                                        + ((self.pattern_palette as u16) << 2)
+                                                        + (((high as u16) >> 7 << 1)
+                                                            | low as u16 >> 7),
                                                 ) & 0b00111111;
                                                 PALLETTE[b as usize]
                                             }
                                         } else {
-                                            let t = color((high >> 7 << 1) | (low >> 7));
-                                            (t, t, t)
+                                            match (high >> 7 << 1) | (low >> 7) {
+                                                0 => (0, 0, 0),
+                                                1 => (75, 75, 75),
+                                                2 => (170, 170, 170),
+                                                3 => (255, 255, 255),
+                                                _ => unreachable!(),
+                                            }
                                         };
-                                        data[i * 4 + 0] = b;
-                                        data[i * 4 + 1] = g;
-                                        data[i * 4 + 2] = r;
-                                        high <<= 1;
+
+                                        if self.grid && (xf == 0 || yf == 0) {
+                                            data[i * 4 + 0] = 0;
+                                            data[i * 4 + 1] = 0;
+                                            data[i * 4 + 2] = 255;
+                                        } else {
+                                            data[i * 4 + 0] = b;
+                                            data[i * 4 + 1] = g;
+                                            data[i * 4 + 2] = r;
+                                        }
+
+                                        data[(i + 1) * 4 + 0] = b;
+                                        data[(i + 1) * 4 + 1] = g;
+                                        data[(i + 1) * 4 + 2] = r;
+
+                                        data[(i + 512) * 4 + 0] = b;
+                                        data[(i + 512) * 4 + 1] = g;
+                                        data[(i + 512) * 4 + 2] = r;
+
+                                        data[(i + 512 + 1) * 4 + 0] = b;
+                                        data[(i + 512 + 1) * 4 + 1] = g;
+                                        data[(i + 512 + 1) * 4 + 2] = r;
+
                                         low <<= 1;
+                                        high <<= 1;
                                     }
                                 }
                             }
                         }
                     }
-                }
-            })
-            .unwrap();
+
+                    // clear the rest of the screen (bottom half)
+                    for y in 0..256 {
+                        for x in 0..512 {
+                            data[((256 * 512) + y * 512 + x) * 4 + 0] = 0;
+                            data[((256 * 512) + y * 512 + x) * 4 + 1] = 0;
+                            data[((256 * 512) + y * 512 + x) * 4 + 2] = 0;
+                            data[((256 * 512) + y * 512 + x) * 4 + 3] = 0;
+                        }
+                    }
+
+                    // draw sprites in oam (if sprites are 8 pixels tall)
+                    let ppu = nes.ppu.borrow();
+                    if !ppu.control_register.get_sprite_height() {
+                        for yc in 0..8usize {
+                            for yf in 0..8usize {
+                                for xc in 0..8usize {
+                                    let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
+                                    let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+
+                                    let pt = if ppu.control_register.get_sprite_height() {
+                                        index & 1
+                                    } else {
+                                        ppu.control_register.get_sprite_tile_select() as u8
+                                    };
+
+                                    let mut low = nes.ppu_bus_read(
+                                        ((pt as u16) << 12)
+                                            | ((index as u16) << 4)
+                                            | (0b0000)
+                                            | yf as u16,
+                                    );
+                                    let mut high = nes.ppu_bus_read(
+                                        ((pt as u16) << 12)
+                                            | ((index as u16) << 4)
+                                            | (0b1000)
+                                            | yf as u16,
+                                    );
+
+                                    for xf in 0..8usize {
+                                        let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
+                                            PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
+                                        } else {
+                                            let b = nes.ppu_bus_read(
+                                                0x3F10
+                                                    + ((palette as u16) << 2)
+                                                    + (((high as u16) >> 7 << 1) | low as u16 >> 7),
+                                            ) & 0b00111111;
+                                            PALLETTE[b as usize]
+                                        };
+
+                                        let i = (256 * 512)
+                                            + (yc * 512 * 8 * 4)
+                                            + (yf * 512 * 4)
+                                            + (xc * 8 * 4)
+                                            + (xf * 4);
+                                        for y in 0..4 {
+                                            for x in 0..4 {
+                                                if self.grid && (xf == 0 || yf == 0) && x == 0 && y == 0
+                                                {
+                                                    data[(i + y * 512 + x) * 4 + 0] = 0;
+                                                    data[(i + y * 512 + x) * 4 + 1] = 0;
+                                                    data[(i + y * 512 + x) * 4 + 2] = 255;
+                                                } else {
+                                                    data[(i + y * 512 + x) * 4 + 0] = b;
+                                                    data[(i + y * 512 + x) * 4 + 1] = g;
+                                                    data[(i + y * 512 + x) * 4 + 2] = r;
+                                                }
+                                            }
+                                        }
+
+                                        low <<= 1;
+                                        high <<= 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // if ppu.control_register.get_sprite_height() {
+                    //     for yc in 0..8usize {
+                    //         for yf in 0..16usize {
+                    //             for xc in 0..8usize {
+                    //                 let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
+                    //                 let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+
+                    //                 let pt = if ppu.control_register.get_sprite_height() {
+                    //                     index & 1
+                    //                 } else {
+                    //                     ppu.control_register.get_sprite_tile_select() as u8
+                    //                 };
+
+                    //                 let mut low = nes.ppu_bus_read(
+                    //                     ((pt as u16) << 12)
+                    //                         | ((index as u16) << 4)
+                    //                         | (0b0000)
+                    //                         | yf as u16,
+                    //                 );
+                    //                 let mut high = nes.ppu_bus_read(
+                    //                     ((pt as u16) << 12)
+                    //                         | ((index as u16) << 4)
+                    //                         | (0b1000)
+                    //                         | yf as u16,
+                    //                 );
+
+                    //                 for xf in 0..8usize {
+                    //                     let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
+                    //                         PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
+                    //                     } else {
+                    //                         let b = nes.ppu_bus_read(
+                    //                             0x3F10
+                    //                                 + ((palette as u16) << 2)
+                    //                                 + (((high as u16) >> 7 << 1) | low as u16 >> 7),
+                    //                         ) & 0b00111111;
+                    //                         PALLETTE[b as usize]
+                    //                     };
+
+                    //                     let i = (256 * 512)
+                    //                         + (yc * 512 * 8 * 4)
+                    //                         + (yf * 512 * 4)
+                    //                         + (xc * 8 * 4)
+                    //                         + (xf * 4);
+                    //                     for y in 0..4 {
+                    //                         for x in 0..4 {
+                    //                             if self.grid && (xf == 0 || yf == 0) && x == 0 && y == 0
+                    //                             {
+                    //                                 data[(i + y * 512 + x) * 4 + 0] = 0;
+                    //                                 data[(i + y * 512 + x) * 4 + 1] = 0;
+                    //                                 data[(i + y * 512 + x) * 4 + 2] = 255;
+                    //                             } else {
+                    //                                 data[(i + y * 512 + x) * 4 + 0] = b;
+                    //                                 data[(i + y * 512 + x) * 4 + 1] = g;
+                    //                                 data[(i + y * 512 + x) * 4 + 2] = r;
+                    //                             }
+                    //                         }
+                    //                     }
+
+                    //                     low <<= 1;
+                    //                     high <<= 1;
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    // }
+
+                    // draw palettes
+                    for yc in 0..8usize {
+                        // draw palette indicator
+                        if yc == self.pattern_palette as usize {
+                            for yf in 0..8usize {
+                                for xf in 0..8 {
+                                    let i = (512 * 8)
+                                        + (256 + 8)
+                                        + 512 * 256
+                                        + yc * 2 * 512 * 8
+                                        + yf * 512
+                                        + xf;
+                                    data[i * 4 + 0] = 0;
+                                    data[i * 4 + 1] = 0;
+                                    data[i * 4 + 2] = 255;
+                                }
+                            }
+                        }
+
+                        for yf in 0..8usize {
+                            for xc in 0..4usize {
+                                let byte =
+                                    nes.ppu_bus_read(0x3F00 | ((yc as u16) << 2) | xc as u16);
+                                let (r, g, b) = PALLETTE[byte as usize & 0b00111111];
+                                for xf in 0..8 {
+                                    let i = (512 * 8)
+                                        + (256 + 24)
+                                        + 512 * 256
+                                        + yc * 2 * 512 * 8
+                                        + yf * 512
+                                        + xc * 8
+                                        + xf;
+                                    data[i * 4 + 0] = b;
+                                    data[i * 4 + 1] = g;
+                                    data[i * 4 + 2] = r;
+                                }
+                            }
+                        }
+                    }
+                })
+                .unwrap();
+        }
 
         self.canvas
             .copy(
@@ -1693,10 +1965,40 @@ impl SdlVramDebugDisplay {
                 state.exit = true;
             }
             Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num1),
+                ..
+            } => {
+                self.mode = 1;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num2),
+                ..
+            } => {
+                self.mode = 2;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num3),
+                ..
+            } => {
+                self.mode = 3;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num4),
+                ..
+            } => {
+                self.mode = 4;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::G),
+                ..
+            } => {
+                self.grid = !self.grid;
+            }
+            Event::KeyDown {
                 keycode: _k @ Some(Keycode::P),
                 ..
             } => {
-                self.palette = !self.palette;
+                self.pattern_palette = (self.pattern_palette + 1) & 0b111;
             }
             _ => {}
         }
@@ -1707,10 +2009,14 @@ struct EmulatorState {
     running: bool,
     exit: bool,
     one_step: bool,
-    stop_on_program_counter: Option<u16>,
 }
 
 fn main() {
+    let show_cpu_debugger = true;
+    let show_ppu_debugger = true;
+    let show_graphics_debugger = true;
+    let show_memory_debugger = true;
+
     let args = std::env::args().collect::<Vec<String>>();
     let file_contents = std::fs::read(args.get(1).expect("file argument missing"))
         .expect("could not read the file");
@@ -1729,96 +2035,143 @@ fn main() {
     let game_window_id = game_window.id();
     let game_canvas = game_window.into_canvas().build().unwrap();
 
-    let debug_window = video_subsystem
-        .window(
-            "nes cpu inspector",
-            SdlDebugDisplay::WIDTH * 3,
-            SdlDebugDisplay::HEIGHT * 3,
+    let mut cpu_debugger = show_cpu_debugger.then(|| {
+        let cpu_debugger_window = video_subsystem
+            .window(
+                "nes cpu debugger",
+                SdlCpuDebugger::WIDTH * 3,
+                SdlCpuDebugger::HEIGHT * 3,
+            )
+            .position(768, 0)
+            .build()
+            .unwrap();
+        let cpu_debugger_window_id = cpu_debugger_window.id();
+        let cpu_debugger_canvas = cpu_debugger_window.into_canvas().build().unwrap();
+        (
+            cpu_debugger_window_id,
+            SdlCpuDebugger::new(cpu_debugger_canvas),
         )
-        .position(768, 0)
-        .build()
-        .unwrap();
-    let debug_window_id = debug_window.id();
-    let debug_canvas = debug_window.into_canvas().build().unwrap();
+    });
 
-    let ppu_debug_window = video_subsystem
-        .window(
-            "nes ppu inspector",
-            SdlPpuDebugDisplay::WIDTH * 3,
-            SdlPpuDebugDisplay::HEIGHT * 3,
+    let mut ppu_debugger = show_ppu_debugger.then(|| {
+        let ppu_debugger_window = video_subsystem
+            .window(
+                "nes ppu debugger",
+                SdlPpuDebugger::WIDTH * 3,
+                SdlPpuDebugger::HEIGHT * 3,
+            )
+            .position(768, 720)
+            .build()
+            .unwrap();
+        let ppu_debugger_window_id = ppu_debugger_window.id();
+        let ppu_debugger_canvas = ppu_debugger_window.into_canvas().build().unwrap();
+        (
+            ppu_debugger_window_id,
+            SdlPpuDebugger::new(ppu_debugger_canvas),
         )
-        .position(768, 720)
-        .build()
-        .unwrap();
-    let ppu_debug_window_id = ppu_debug_window.id();
-    let ppu_debug_canvas = ppu_debug_window.into_canvas().build().unwrap();
+    });
 
-    let memory_window = video_subsystem
-        .window(
-            "nes memory inspector",
-            SdlMemoryDisplay::WIDTH * 2,
-            SdlMemoryDisplay::HEIGHT * 2,
+    let mut memory_debugger = show_memory_debugger.then(|| {
+        let memory_debugger_window = video_subsystem
+            .window(
+                "nes memory debugger",
+                SdlMemoryDebugger::WIDTH * 2,
+                SdlMemoryDebugger::HEIGHT * 2,
+            )
+            .position(0, 1)
+            .build()
+            .unwrap();
+        let memory_debugger_window_id = memory_debugger_window.id();
+        let memory_debugger_canvas = memory_debugger_window.into_canvas().build().unwrap();
+        (
+            memory_debugger_window_id,
+            SdlMemoryDebugger::new(memory_debugger_canvas),
         )
-        .position(0, 1)
-        .build()
-        .unwrap();
-    let memory_window_id = memory_window.id();
-    let memory_canvas = memory_window.into_canvas().build().unwrap();
+    });
 
-    let vram_window = video_subsystem
-        .window(
-            "nes vram",
-            SdlVramDebugDisplay::WIDTH * 2,
-            SdlVramDebugDisplay::HEIGHT * 2,
+    let mut graphics_debugger = show_graphics_debugger.then(|| {
+        let graphics_debugger_window = video_subsystem
+            .window(
+                "nes graphics debugger",
+                SdlGraphicsDebugger::WIDTH * 2,
+                SdlGraphicsDebugger::HEIGHT * 2,
+            )
+            .position(0, 1)
+            .build()
+            .unwrap();
+        let graphics_debugger_window_id = graphics_debugger_window.id();
+        let graphics_debugger_window_canvas =
+            graphics_debugger_window.into_canvas().build().unwrap();
+        (
+            graphics_debugger_window_id,
+            SdlGraphicsDebugger::new(graphics_debugger_window_canvas),
         )
-        .position(0, 1)
-        .build()
-        .unwrap();
-    let vram_window_id = vram_window.id();
-    let vram_canvas = vram_window.into_canvas().build().unwrap();
+    });
 
     let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
     let display = SdlDisplay::new(game_window.clone());
     let input = SdlInput::new(game_window.clone());
-    let mut debug_display = SdlDebugDisplay::new(debug_canvas);
-    let mut memory_display = SdlMemoryDisplay::new(memory_canvas);
-    let mut ppu_debug_display = SdlPpuDebugDisplay::new(ppu_debug_canvas);
-    let mut vram_window = SdlVramDebugDisplay::new(vram_canvas);
     let mut nes = Nes::new(game_file, display, input).expect("Could not start the game");
 
     let mut state = EmulatorState {
         running: true,
         exit: false,
         one_step: false,
-        stop_on_program_counter: None,
     };
 
     game_window.borrow_mut().actual_display();
-    debug_display.update(&nes);
-    debug_display.show(&nes);
-    memory_display.update(&nes);
-    memory_display.show(&nes);
-    ppu_debug_display.display(&nes);
-    vram_window.display(&nes);
-
-    let mut i = 0;
+    if let Some((_id, debugger)) = &mut cpu_debugger {
+        debugger.update(&nes);
+        debugger.show(&nes);
+    }
+    if let Some((_id, debugger)) = &mut memory_debugger {
+        debugger.show(&nes);
+    }
+    if let Some((_id, debugger)) = &mut ppu_debugger {
+        debugger.display(&nes);
+    }
+    if let Some((_id, debugger)) = &mut graphics_debugger {
+        debugger.display(&nes);
+    }
 
     loop {
         let start_time = std::time::Instant::now();
 
         for event in event_pump.poll_iter() {
+            let event_id = event.get_window_id();
             if event.get_window_id() == Some(game_window_id) {
                 game_window
                     .borrow_mut()
                     .handle_event(event, &nes, &mut state);
-            } else if event.get_window_id() == Some(memory_window_id) {
-                memory_display.handle_event(event, &nes, &mut state);
-            } else if event.get_window_id() == Some(debug_window_id) {
-                debug_display.handle_event(event, &nes, &mut state);
-            } else if event.get_window_id() == Some(ppu_debug_window_id) {
-                ppu_debug_display.handle_event(event, &nes, &mut state);
-            } else if event.get_window_id() == Some(vram_window_id) {
-                vram_window.handle_event(event, &nes, &mut state);
+                continue;
+            }
+            match &mut cpu_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &nes, &mut state);
+                    continue;
+                }
+                _ => {}
+            }
+            match &mut ppu_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &nes, &mut state);
+                    continue;
+                }
+                _ => {}
+            }
+            match &mut memory_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &nes, &mut state);
+                    continue;
+                }
+                _ => {}
+            }
+            match &mut graphics_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &nes, &mut state);
+                    continue;
+                }
+                _ => {}
             }
         }
 
@@ -1828,34 +2181,41 @@ fn main() {
 
         if !state.running && state.one_step {
             nes.run_one_cpu_instruction();
-            debug_display.update(&nes);
-            memory_display.update(&nes);
+            if let Some((_id, debugger)) = &mut cpu_debugger {
+                debugger.update(&nes);
+            }
             state.one_step = false;
         } else if state.running {
             for _ in 0..29829 {
                 nes.run_one_cpu_tick();
-                debug_display.update(&nes);
-                memory_display.update(&nes);
-                if debug_display
-                    .breakpoints
-                    .contains(&nes.cpu.borrow().program_counter)
-                {
-                    while !nes.cpu.borrow().finished_instruction() {
-                        nes.run_one_cpu_tick();
-                        debug_display.update(&nes);
-                        memory_display.update(&nes);
+                if let Some((_id, debugger)) = &mut cpu_debugger {
+                    debugger.update(&nes);
+
+                    if debugger
+                        .breakpoints
+                        .contains(&nes.cpu.borrow().program_counter)
+                    {
+                        while !nes.cpu.borrow().finished_instruction() {
+                            nes.run_one_cpu_tick();
+                            debugger.update(&nes);
+                        }
+                        state.running = false;
+                        break;
                     }
-                    state.running = false;
-                    break;
                 }
             }
         }
 
         game_window.borrow_mut().actual_display();
-        debug_display.show(&nes);
-        memory_display.show(&nes);
-        ppu_debug_display.display(&nes);
-        vram_window.display(&nes);
+        if let Some((_id, debugger)) = &mut ppu_debugger {
+            debugger.display(&nes);
+        }
+        if let Some((_id, debugger)) = &mut memory_debugger {
+            debugger.show(&nes);
+        }
+        if let Some((_id, debugger)) = &mut graphics_debugger {
+            debugger.display(&nes);
+        }
 
         // 60fps
         let nanos_to_sleep =
@@ -1863,11 +2223,6 @@ fn main() {
         if nanos_to_sleep != Duration::ZERO {
             std::thread::sleep(nanos_to_sleep);
         }
-
-        // i += 1;
-        // if i > 1 {
-        //     break;
-        // }
     }
 }
 
@@ -1875,7 +2230,7 @@ fn main() {
 fn disassebly_table_has_unique_elements() {
     let mut set = std::collections::BTreeSet::<(Operation, AddressingMode)>::new();
 
-    for entry in SdlDebugDisplay::DISASSEMBLY_TABLE.iter() {
+    for entry in SdlCpuDebugger::DISASSEMBLY_TABLE.iter() {
         if set.contains(entry) && entry != &(Operation::XXX, AddressingMode::Implied) {
             panic!("{:?} {:?} repeats", entry.0, entry.1);
         }

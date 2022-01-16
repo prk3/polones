@@ -7,10 +7,10 @@ impl<const SIZE: usize> Ram<SIZE> {
     pub fn new() -> Self {
         Self { data: [0; SIZE] }
     }
-    pub fn read(&self, address: u16) -> u8 {
-        self.data[address as usize & (SIZE - 1)]
+    pub fn read(&self, address: usize) -> u8 {
+        self.data[address & (SIZE - 1)]
     }
-    pub fn write(&mut self, address: u16, value: u8) {
-        self.data[address as usize & (SIZE - 1)] = value;
+    pub fn write(&mut self, address: usize, value: u8) {
+        self.data[address & (SIZE - 1)] = value;
     }
 }

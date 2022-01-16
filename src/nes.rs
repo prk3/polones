@@ -112,7 +112,7 @@ impl Nes {
     }
     pub fn cpu_bus_read(&self, address: u16) -> u8 {
         match address {
-            0x0000..=0x1FFF => self.cpu_ram.borrow_mut().read(address),
+            0x0000..=0x1FFF => self.cpu_ram.borrow_mut().read(address as usize),
             0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_read(self, address),
             0x4016..=0x4017 => self.io.borrow_mut().read(self, address),
             address if self.mapper.borrow().cpu_address_mapped(address) => {
@@ -129,7 +129,7 @@ impl Nes {
     }
     pub fn cpu_bus_write(&self, address: u16, value: u8) {
         match address {
-            0x0000..=0x1FFF => self.cpu_ram.borrow_mut().write(address, value),
+            0x0000..=0x1FFF => self.cpu_ram.borrow_mut().write(address as usize, value),
             0x2000..=0x3FFF => self.ppu.borrow_mut().cpu_write(self, address, value),
             0x4014 => self.oam_dma.borrow_mut().write(value),
             0x4016..=0x4017 => self.io.borrow_mut().write(self, address, value),
@@ -146,14 +146,14 @@ impl Nes {
     }
     pub fn ppu_bus_read(&self, address: u16) -> u8 {
         match address & 0x3FFF {
-            0x3F00..=0x3FFF => self.ppu_palette_ram.borrow().read(address),
+            0x3F00..=0x3FFF => self.ppu_palette_ram.borrow().read(address as usize),
             _a if self.mapper.borrow().ppu_address_mapped(address) => {
                 self.mapper.borrow_mut().ppu_read(address)
             }
             0x2000..=0x3EFF => self
                 .ppu_nametable_ram
                 .borrow()
-                .read(self.mapper.borrow().ppu_nametable_address_mapped(address)),
+                .read(self.mapper.borrow().ppu_nametable_address_mapped(address) as usize),
             _ => unreachable!(),
         }
     }
@@ -162,17 +162,17 @@ impl Nes {
             _a @ 0x3F00..=0x3FFF => {
                 let mut ram = self.ppu_palette_ram.borrow_mut();
                 if address & 0b11 == 0 {
-                    ram.write(address & 0b11101111, value);
-                    ram.write(address | 0b00010000, value);
+                    ram.write(address as usize & 0b11101111, value);
+                    ram.write(address as usize | 0b00010000, value);
                 } else {
-                    ram.write(address, value);
+                    ram.write(address as usize, value);
                 }
             }
             _a if self.mapper.borrow().ppu_address_mapped(address) => {
                 self.mapper.borrow_mut().ppu_write(address, value)
             }
             0x2000..=0x3EFF => self.ppu_nametable_ram.borrow_mut().write(
-                self.mapper.borrow().ppu_nametable_address_mapped(address),
+                self.mapper.borrow().ppu_nametable_address_mapped(address) as usize,
                 value,
             ),
             _ => unreachable!(),

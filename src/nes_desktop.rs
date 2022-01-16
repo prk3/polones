@@ -1770,21 +1770,18 @@ impl SdlGraphicsDebugger {
                                     let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
                                     let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
 
-                                    let pt = if ppu.control_register.get_sprite_height() {
-                                        index & 1
-                                    } else {
-                                        ppu.control_register.get_sprite_tile_select() as u8
-                                    };
+                                    let pt = ppu.control_register.get_sprite_tile_select() as u8;
+                                    let tile = index;
 
                                     let mut low = nes.ppu_bus_read(
                                         ((pt as u16) << 12)
-                                            | ((index as u16) << 4)
+                                            | ((tile as u16) << 4)
                                             | (0b0000)
                                             | yf as u16,
                                     );
                                     let mut high = nes.ppu_bus_read(
                                         ((pt as u16) << 12)
-                                            | ((index as u16) << 4)
+                                            | ((tile as u16) << 4)
                                             | (0b1000)
                                             | yf as u16,
                                     );
@@ -1806,6 +1803,7 @@ impl SdlGraphicsDebugger {
                                             + (yf * 512 * 4)
                                             + (xc * 8 * 4)
                                             + (xf * 4);
+
                                         for y in 0..4 {
                                             for x in 0..4 {
                                                 if self.grid && (xf == 0 || yf == 0) && x == 0 && y == 0
@@ -1829,71 +1827,74 @@ impl SdlGraphicsDebugger {
                         }
                     }
 
-                    // if ppu.control_register.get_sprite_height() {
-                    //     for yc in 0..8usize {
-                    //         for yf in 0..16usize {
-                    //             for xc in 0..8usize {
-                    //                 let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
-                    //                 let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+                    // draw sprites in oam (if sprites are 16 pixels tall)
+                    if ppu.control_register.get_sprite_height() {
+                        for yc in 0..8usize {
+                            for yf in 0..16usize {
+                                for xc in 0..8usize {
+                                    let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
+                                    let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
 
-                    //                 let pt = if ppu.control_register.get_sprite_height() {
-                    //                     index & 1
-                    //                 } else {
-                    //                     ppu.control_register.get_sprite_tile_select() as u8
-                    //                 };
+                                    let pt = index & 1;
+                                    let tile = if yf <= 7 {
+                                        index & 0b11111110
+                                    } else {
+                                        index | 0b00000001
+                                    };
 
-                    //                 let mut low = nes.ppu_bus_read(
-                    //                     ((pt as u16) << 12)
-                    //                         | ((index as u16) << 4)
-                    //                         | (0b0000)
-                    //                         | yf as u16,
-                    //                 );
-                    //                 let mut high = nes.ppu_bus_read(
-                    //                     ((pt as u16) << 12)
-                    //                         | ((index as u16) << 4)
-                    //                         | (0b1000)
-                    //                         | yf as u16,
-                    //                 );
+                                    let mut low = nes.ppu_bus_read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b0000)
+                                            | (yf & 0b111) as u16,
+                                    );
+                                    let mut high = nes.ppu_bus_read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b1000)
+                                            | (yf & 0b111) as u16,
+                                    );
 
-                    //                 for xf in 0..8usize {
-                    //                     let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                    //                         PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
-                    //                     } else {
-                    //                         let b = nes.ppu_bus_read(
-                    //                             0x3F10
-                    //                                 + ((palette as u16) << 2)
-                    //                                 + (((high as u16) >> 7 << 1) | low as u16 >> 7),
-                    //                         ) & 0b00111111;
-                    //                         PALLETTE[b as usize]
-                    //                     };
+                                    for xf in 0..8usize {
+                                        let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
+                                            PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
+                                        } else {
+                                            let b = nes.ppu_bus_read(
+                                                0x3F10
+                                                    + ((palette as u16) << 2)
+                                                    + (((high as u16) >> 7 << 1) | low as u16 >> 7),
+                                            ) & 0b00111111;
+                                            PALLETTE[b as usize]
+                                        };
 
-                    //                     let i = (256 * 512)
-                    //                         + (yc * 512 * 8 * 4)
-                    //                         + (yf * 512 * 4)
-                    //                         + (xc * 8 * 4)
-                    //                         + (xf * 4);
-                    //                     for y in 0..4 {
-                    //                         for x in 0..4 {
-                    //                             if self.grid && (xf == 0 || yf == 0) && x == 0 && y == 0
-                    //                             {
-                    //                                 data[(i + y * 512 + x) * 4 + 0] = 0;
-                    //                                 data[(i + y * 512 + x) * 4 + 1] = 0;
-                    //                                 data[(i + y * 512 + x) * 4 + 2] = 255;
-                    //                             } else {
-                    //                                 data[(i + y * 512 + x) * 4 + 0] = b;
-                    //                                 data[(i + y * 512 + x) * 4 + 1] = g;
-                    //                                 data[(i + y * 512 + x) * 4 + 2] = r;
-                    //                             }
-                    //                         }
-                    //                     }
+                                        let i = (256 * 512)
+                                            + (yc * 512 * 8 * 4)
+                                            + (yf * 512 * 2)
+                                            + (xc * 8 * 2)
+                                            + (xf * 2);
 
-                    //                     low <<= 1;
-                    //                     high <<= 1;
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    // }
+                                        for y in 0..2 {
+                                            for x in 0..2 {
+                                                if self.grid && (xf == 0 || yf == 0) && x == 0 && y == 0
+                                                {
+                                                    data[(i + y * 512 + x) * 4 + 0] = 0;
+                                                    data[(i + y * 512 + x) * 4 + 1] = 0;
+                                                    data[(i + y * 512 + x) * 4 + 2] = 255;
+                                                } else {
+                                                    data[(i + y * 512 + x) * 4 + 0] = b;
+                                                    data[(i + y * 512 + x) * 4 + 1] = g;
+                                                    data[(i + y * 512 + x) * 4 + 2] = r;
+                                                }
+                                            }
+                                        }
+
+                                        low <<= 1;
+                                        high <<= 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // draw palettes
                     for yc in 0..8usize {

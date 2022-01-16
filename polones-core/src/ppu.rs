@@ -588,7 +588,7 @@ impl Ppu {
             self.buffer_index = 0;
             let mut buffer = Box::new([[(0, 0, 0); 256]; 240]);
             std::mem::swap(&mut buffer, &mut self.buffer);
-            nes.display.borrow_mut().display(buffer);
+            nes.display.borrow_mut().draw(buffer);
         }
 
         if self.dot == 257 {}

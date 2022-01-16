@@ -11,7 +11,7 @@ pub type Frame = [[(u8, u8, u8); 256]; 240];
 /// Abstraction over main display device.
 pub trait Display {
     /// Draws a frame to the screen.
-    fn display(&mut self, frame: Box<Frame>);
+    fn draw(&mut self, frame: Box<Frame>);
 }
 
 pub enum PortState {
@@ -45,15 +45,15 @@ pub struct Nes {
     pub mapper: RefCell<Box<dyn Mapper>>,
 
     pub cpu: RefCell<Cpu>,
-    pub cpu_ram: RefCell<Ram<0x800>>,
+    pub cpu_ram: RefCell<Ram<{ 2 * 1024 }>>,
     pub oam_dma: RefCell<OamDma>,
 
     pub ppu: RefCell<Ppu>,
-    pub ppu_nametable_ram: RefCell<Ram<0x800>>,
-    pub ppu_palette_ram: RefCell<Ram<0x20>>,
+    pub ppu_nametable_ram: RefCell<Ram<{ 2 * 1024 }>>,
+    pub ppu_palette_ram: RefCell<Ram<32>>,
 
     pub display: RefCell<Box<dyn Display>>,
-    io: RefCell<Io>,
+    pub io: RefCell<Io>,
     pub input: RefCell<Box<dyn Input>>,
 }
 

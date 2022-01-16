@@ -100,27 +100,3 @@ impl Mapper for Mapper000 {
         }
     }
 }
-
-#[test]
-fn test_nametable_address_mapping() {
-    let dk = include_bytes!("../../tests/roms/dk.nes").to_vec();
-    let mut game = GameFile::read("dk".into(), dk.clone()).unwrap();
-    game.mirroring_vertical = true;
-    let mapper = Mapper000::from_game(game).unwrap();
-
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2000));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2400));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2800));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2C00));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x3000));
-
-    let mut game = GameFile::read("donkey kong".into(), dk).unwrap();
-    game.mirroring_vertical = false;
-    let mapper = Mapper000::from_game(game).unwrap();
-
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2000));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x2400));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2800));
-    assert_eq!(0x0400, mapper.ppu_nametable_address_mapped(0x2C00));
-    assert_eq!(0x0000, mapper.ppu_nametable_address_mapped(0x3000));
-}

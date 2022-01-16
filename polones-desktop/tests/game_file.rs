@@ -1,4 +1,4 @@
-use nes_lib::game_file::GameFile;
+use polones_core::game_file::GameFile;
 
 #[test]
 fn reads_all_game_files() {
@@ -12,7 +12,7 @@ fn reads_all_game_files() {
             println!("reading {}", path.display());
             let contents = fs::read(&path).unwrap();
             let game_file = GameFile::read(path.display().to_string(), contents).unwrap();
-            println!("read    {}, format {:?}, mapper {}", path.display(), game_file.format, game_file.mapper);
+            println!("read {}, format {:?}, mapper {}", path.display(), game_file.format, game_file.mapper);
         }
     }
 }

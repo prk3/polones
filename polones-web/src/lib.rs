@@ -3,6 +3,7 @@ mod utils;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Display, Frame, Input, Nes, PortState};
 
+use utils::set_panic_hook;
 use wasm_bindgen::{prelude::*, Clamped};
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
@@ -20,6 +21,7 @@ extern "C" {
 
 #[wasm_bindgen]
 pub fn polones_start(rom: Vec<u8>) -> Option<String> {
+    set_panic_hook();
 
     let game = match GameFile::read("rom".into(), rom) {
         Ok(game) => game,
@@ -52,7 +54,7 @@ struct CanvasDisplay {}
 impl Display for CanvasDisplay {
     fn draw(&mut self, frame: Box<Frame>) {
         let mut output = Vec::with_capacity(256 * 240 * 4);
-        for row in frame.into_iter() {
+        for row in frame.iter() {
             for pixel in row {
                 output.push(pixel.0);
                 output.push(pixel.1);

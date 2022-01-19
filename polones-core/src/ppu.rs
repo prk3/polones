@@ -219,6 +219,8 @@ pub struct Ppu {
     sprite_counters: [u8; 64],
     sprite_0_next_scanline: bool,
     sprite_0_current_scanline: bool,
+    sprites_next_frame: usize,
+    sprites_current_frame: usize,
 }
 
 impl Ppu {
@@ -264,6 +266,8 @@ impl Ppu {
             sprite_counters: [0xFF; 64],
             sprite_0_next_scanline: false,
             sprite_0_current_scanline: false,
+            sprites_next_frame: 0,
+            sprites_current_frame: 0,
         }
     }
 
@@ -343,6 +347,8 @@ impl Ppu {
                     }
                 }
             }
+
+            self.sprites_next_frame = sprites_found;
         }
 
         // sprite tile fetches
@@ -375,13 +381,14 @@ impl Ppu {
         }
         // sprite 8-63 fetches
         if (self.scanline <= 239 || self.scanline == 261) && self.dot == 320 {
-            for sprite_number in 8..63 {
+            for sprite_number in 8..self.sprite_limit {
                 self.sprite_counters[sprite_number] =
                     self.sprite_secondary_oam[sprite_number * 4 + 3];
                 self.set_oam_pattern(nes, sprite_number, false);
                 self.set_oam_pattern(nes, sprite_number, true);
             }
             self.sprite_0_current_scanline = self.sprite_0_next_scanline;
+            self.sprites_current_frame = self.sprites_next_frame;
         }
 
         // deal with render and pre-render scanlines
@@ -393,7 +400,7 @@ impl Ppu {
                 self.attribute_high_shift_register <<= 1;
             }
             if (2..=257).contains(&self.dot) {
-                for i in 0..64 {
+                for i in 0..self.sprite_limit {
                     if self.sprite_counters[i] > 0 {
                         self.sprite_counters[i] -= 1;
                     } else {
@@ -437,7 +444,7 @@ impl Ppu {
                 if self.mask_register.get_show_sprites()
                     && !(!self.mask_register.get_show_sprites() && self.dot <= 8)
                 {
-                    for i in 0..self.sprite_limit {
+                    for i in 0..self.sprites_current_frame {
                         if self.sprite_counters[i] == 0 {
                             let color_low = self.sprite_patterns_low[i] >> 7;
                             let color_high = self.sprite_patterns_high[i] >> 7;

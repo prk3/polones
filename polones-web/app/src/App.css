@@ -31,3 +31,14 @@
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
 }
+
+.toolbar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  background-color: rgb(20, 20, 20);
+}

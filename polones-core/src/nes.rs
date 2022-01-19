@@ -89,9 +89,9 @@ impl Nes {
         let ppu = RefCell::new(Ppu::new());
         let ppu_nametable_ram = RefCell::new(Ram::new());
         let ppu_palette_ram = RefCell::new(Ram::new());
-        let display = RefCell::new(Box::new(display));
+        let display = RefCell::new(Box::new(display) as Box<dyn Display>);
         let io = RefCell::new(Io::new());
-        let input = RefCell::new(Box::new(input));
+        let input = RefCell::new(Box::new(input) as Box<dyn Input>);
 
         let nes = Self {
             mapper,

@@ -1,4 +1,4 @@
-import React, { DragEvent } from 'react';
+import React, { DragEvent, MouseEvent } from 'react';
 
 import './App.css';
 
@@ -22,7 +22,8 @@ function App() {
     window.visualViewport.width,
     window.visualViewport.height
   ]);
-  const [running, setRunning] = React.useState(false);
+  const [state, setState] = React.useState<'rom' | 'running' | 'paused'>('rom');
+  const [gameInterval, setGameInterval] = React.useState<number | null>();
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   React.useEffect(() => {
@@ -74,16 +75,13 @@ function App() {
         .then(rom => {
           let error = polones!.polones_start(new Uint8Array(rom));
           if (error) {
-            setRunning(false);
             setError(error);
+            setState('rom');
+            setGameInterval(null);
           } else {
-            setRunning(true);
             setError(null);
-            window.setInterval(() => {
-              for (let i = 0; i < 29829; i++) {
-                polones!.polones_tick();
-              }
-            }, 1000/60);
+            setState('running');
+            setGameInterval(startInterval());
           }
         })
         .catch(error => setError(error));
@@ -92,8 +90,46 @@ function App() {
     }
   }
 
+  function startInterval(): number {
+    const ref = { current: 0 };
+    ref.current = window.setInterval(function runTicksForOneFrame() {
+      try {
+        for (let i = 0; i < 29829; i++) {
+          polones!.polones_tick();
+        }
+      } catch (e) {
+        window.clearInterval(ref.current);
+        console.error(e);
+      }
+    }, 1000/60);
+    return ref.current;
+  }
+
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+  }
+
+  function handlePauseClick(_event: MouseEvent<HTMLButtonElement>) {
+    if (state === 'running') {
+      window.clearInterval(gameInterval!);
+      setGameInterval(null);
+      setState('paused');
+    }
+  }
+
+  function handleUnpauseClick(_event: MouseEvent<HTMLButtonElement>) {
+    if (state === 'paused') {
+      setGameInterval(startInterval());
+      setState('running');
+    }
+  }
+
+  function handleStopClick(_event: MouseEvent<HTMLButtonElement>) {
+    if (state !== 'rom') {
+      window.clearInterval(gameInterval!);
+      setGameInterval(null);
+      setState('rom');
+    }
   }
 
   let viewportRatio = viewportSize[0] / viewportSize[1];
@@ -121,17 +157,29 @@ function App() {
   return (
     <div className="App">
       <div className="center">
-        {polones && !running && (
+        {polones && state === 'rom' && (
           <div id="rom" className="rom-input" onDrop={handleDrop} onDragOver={handleDragOver}>
             Drop a ROM here!
           </div>
         )}
-        {polones && running && (
+        {polones && (state !== 'rom') && (
           <canvas ref={canvasRef} width={256} height={240} className="canvas" style={{ transform }}></canvas>
         )}
         {error && (
           <div className="error">{error}</div>
         )}
+
+        <aside className="toolbar">
+          {state === 'running' && (
+            <button type="button" onClick={handlePauseClick}>⏸︎</button>
+          )}
+          {state === 'paused' && (
+            <button type="button" onClick={handleUnpauseClick}>⏵︎</button>
+          )}
+          {state !== 'rom' && (
+            <button type="button" onClick={handleStopClick}>&times;</button>
+          )}
+        </aside>
       </div>
     </div>
   );

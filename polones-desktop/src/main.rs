@@ -322,10 +322,10 @@ pub struct EmulatorState {
 }
 
 fn main() {
-    let show_cpu_debugger = true;
-    let show_ppu_debugger = true;
-    let show_graphics_debugger = true;
-    let show_memory_debugger = true;
+    let show_cpu_debugger = false;
+    let show_ppu_debugger = false;
+    let show_graphics_debugger = false;
+    let show_memory_debugger = false;
 
     let args = std::env::args().collect::<Vec<String>>();
     let file_contents = std::fs::read(args.get(1).expect("file argument missing"))

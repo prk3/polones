@@ -1,6 +1,0 @@
-[workspace]
-members = [
-  "polones-core",
-  "polones-desktop",
-  "polones-web",
-]

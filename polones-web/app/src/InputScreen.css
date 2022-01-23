@@ -1,0 +1,89 @@
+.inputScreenContainer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background-color: rgb(233, 233, 233);
+  color: black;
+}
+
+.gamepad {
+  --width: 260px;
+  margin: 10px;
+  width: var(--width);
+  height: calc(var(--width) / 260 * 100);
+  border: solid calc(var(--width) / 260 * 3) black;
+  border-radius: calc(var(--width) / 260 * 6);
+  position: relative;
+}
+
+.gamepad-button {
+  position: absolute;
+}
+
+.round {
+  width: calc(var(--width) * 0.08);
+  height: calc(var(--width) * 0.08);
+  border-radius: 50%;
+  border: solid calc(var(--width) / 260 * 3) black;
+}
+
+.directional {
+  width: calc(var(--width) * 0.08);
+  height: calc(var(--width) * 0.08);
+  border-radius: 25%;
+  border: solid calc(var(--width) / 260 * 3) black;
+}
+
+.short {
+  width: calc(var(--width) * 0.08);
+  height: calc(var(--width) * 0.04);
+  border-radius: calc(var(--width) * 0.04);
+  border: solid calc(var(--width) / 260 * 3) black;
+}
+
+.a {
+  top: 61%;
+  left: 80%;
+}
+
+.b {
+  top: 61%;
+  left: 66%;
+}
+
+.select {
+  top: 68%;
+  left: 38%;
+}
+
+.start {
+  top: 68%;
+  left: 49%;
+}
+
+.up {
+  top: 38%;
+  left: 16%;
+}
+
+.down {
+  top: 69%;
+  left: 16%;
+}
+
+.left {
+  top: 54%;
+  left: 9%;
+}
+
+.right {
+  top: 54%;
+  left: 23%;
+}
+
+.highlight {
+  border-color: red;
+  background-color: red;
+}

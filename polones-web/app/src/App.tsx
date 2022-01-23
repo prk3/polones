@@ -1,10 +1,15 @@
 import React, { DragEvent, MouseEvent } from 'react';
+import InputScreen from './InputScreen';
 
 import './App.css';
+import { InputMapping } from './types';
 
 declare global {
   interface Window {
-    polones_display_draw(frame: Uint8ClampedArray): void;
+    keyboardState: { [key: string]: boolean },
+    isPressed(path: string): boolean,
+    polones_display_draw(frame: Uint8ClampedArray): void,
+    polones_input_read_port_1(): string,
   }
 }
 
@@ -23,8 +28,26 @@ function App() {
     window.visualViewport.height
   ]);
   const [state, setState] = React.useState<'rom' | 'running' | 'paused'>('rom');
+  const [inputMapping, setInputMapping] = React.useState<InputMapping>((() => {
+    let inputMapping = window.localStorage.getItem('inputMapping');
+    if (inputMapping) {
+      return JSON.parse(inputMapping);
+    } else {
+      return {
+        port1: {
+          type: 'unplugged',
+        },
+        port2: {
+          type: 'unplugged',
+        }
+      };
+    }
+  })());
+  const inputMappingRef = React.useRef<InputMapping>(inputMapping);
   const [gameInterval, setGameInterval] = React.useState<number | null>();
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const [inputScreenVisible, setInputScreenVisible] = React.useState(false);
+  const [wasRunningBeforeInputScreen, setWasRunningBeforeInputScreen] = React.useState(false);
 
   React.useEffect(() => {
     importPolones()
@@ -38,12 +61,73 @@ function App() {
           ]);
         };
 
-        window.polones_display_draw = function (frame: Uint8ClampedArray) {
+        window.keyboardState = {};
+
+        window.onkeydown = event => {
+          if (event.key !== "Unidentified" && event.key !== "Dead") {
+            window.keyboardState[event.key] = true;
+          }
+        };
+
+        window.onblur = event => {
+          for (const key in window.keyboardState) {
+            window.keyboardState[key] = false;
+          }
+        };
+
+        window.onkeyup = event => {
+          if (event.key !== "Unidentified" && event.key !== "Dead") {
+            window.keyboardState[event.key] = false;
+          }
+        };
+
+        window.isPressed = (path: string) => {
+          let segments = path.split('.');
+          if (segments[0] === 'keyboard') {
+            return !!window.keyboardState[segments[1]];
+          }
+          if (segments[0] === 'gamepad') {
+            for (const gamepad of window.navigator.getGamepads()) {
+              if (gamepad && gamepad.id.replaceAll('.', '') === segments[1]) {
+                if (segments[2] === 'button') {
+                  let index = Number(segments[3]);
+                  if (index < gamepad.buttons.length) {
+                    return !!gamepad.buttons[index].pressed || gamepad.buttons[index].value > 0.9;
+                  }
+                }
+              }
+            }
+          }
+          return false;
+        };
+
+        window.polones_display_draw = function polones_display_draw(frame: Uint8ClampedArray) {
           canvasRef
             .current
             ?.getContext('2d')
             ?.putImageData(new ImageData(frame, 256, 240), 0, 0);
         };
+
+        window.polones_input_read_port_1 = function polones_input_read_port_1() {
+          switch (inputMappingRef.current.port1.type) {
+            case 'unplugged':
+              return JSON.stringify({
+                type: 'unplugged',
+              });
+            case 'gamepad':
+              return JSON.stringify({
+                type: 'gamepad',
+                a: window.isPressed(inputMappingRef.current.port1.a),
+                b: window.isPressed(inputMappingRef.current.port1.b),
+                select: window.isPressed(inputMappingRef.current.port1.select),
+                start: window.isPressed(inputMappingRef.current.port1.start),
+                up: window.isPressed(inputMappingRef.current.port1.up),
+                down: window.isPressed(inputMappingRef.current.port1.down),
+                left: window.isPressed(inputMappingRef.current.port1.left),
+                right: window.isPressed(inputMappingRef.current.port1.right),
+              });
+          }
+        }
       })
       .catch(error => setError(error));
   }, []);
@@ -132,6 +216,31 @@ function App() {
     }
   }
 
+  function handleInputScreenClick(_event: MouseEvent<HTMLButtonElement>) {
+    if (state === 'running') {
+      window.clearInterval(gameInterval!);
+      setGameInterval(null);
+      setState('paused');
+      setWasRunningBeforeInputScreen(true);
+    } else {
+      setWasRunningBeforeInputScreen(false);
+    }
+    setInputScreenVisible(true);
+  }
+
+  function handleInputMappingChange(inputMapping: InputMapping) {
+    setInputMapping(inputMapping);
+    inputMappingRef.current = inputMapping;
+  }
+
+  function handleInputScreenClose() {
+    setInputScreenVisible(false);
+    if (wasRunningBeforeInputScreen && state === 'paused') {
+      setGameInterval(startInterval());
+      setState('running');
+    }
+  }
+
   let viewportRatio = viewportSize[0] / viewportSize[1];
   let canvasRatio = 256 / 240;
   let zoom: number;
@@ -177,9 +286,18 @@ function App() {
             <button type="button" onClick={handleUnpauseClick}>⏵︎</button>
           )}
           {state !== 'rom' && (
-            <button type="button" onClick={handleStopClick}>&times;</button>
+            <button type="button" onClick={handleStopClick}>×</button>
           )}
+          <button type="button" onClick={handleInputScreenClick}>🎮</button>
         </aside>
+
+        {inputScreenVisible && (
+          <InputScreen
+            inputMapping={inputMapping}
+            onInputMappingChange={handleInputMappingChange}
+            onClose={handleInputScreenClose}
+          />
+        )}
       </div>
     </div>
   );

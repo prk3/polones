@@ -1,10 +1,10 @@
 mod utils;
+use utils::set_panic_hook;
+use wasm_bindgen::{prelude::*, Clamped};
 
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Display, Frame, Input, Nes, PortState};
-
-use utils::set_panic_hook;
-use wasm_bindgen::{prelude::*, Clamped};
+use serde::Deserialize;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -17,6 +17,7 @@ static mut NES: Option<Nes> = None;
 #[wasm_bindgen]
 extern "C" {
     fn polones_display_draw(frame: Clamped<Vec<u8>>);
+    fn polones_input_read_port_1() -> String;
 }
 
 #[wasm_bindgen]
@@ -70,7 +71,34 @@ struct WebInput {}
 
 impl Input for WebInput {
     fn read_port_1(&mut self) -> polones_core::nes::PortState {
-        PortState::Unplugged
+        #[derive(Deserialize)]
+        #[serde(tag = "type")]
+        enum PortStateExternal {
+            #[serde(rename = "unplugged")]
+            Unplugged {},
+            #[serde(rename = "gamepad")]
+            Gamepad {
+                a: bool,
+                b: bool,
+                select: bool,
+                start: bool,
+                up: bool,
+                down: bool,
+                left: bool,
+                right: bool,
+            },
+        }
+
+        let port_state_external_str = polones_input_read_port_1();
+        let port_state_external = serde_json::from_str(&port_state_external_str).unwrap();
+        match port_state_external {
+            PortStateExternal::Unplugged { .. } => {
+                PortState::Unplugged
+            }
+            PortStateExternal::Gamepad { a, b, select, start, up, down, left, right } => {
+                PortState::Gamepad { a, b, select, start, up, down, left, right }
+            }
+        }
     }
 
     fn read_port_2(&mut self) -> polones_core::nes::PortState {

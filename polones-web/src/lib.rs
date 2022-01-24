@@ -18,6 +18,7 @@ static mut NES: Option<Nes> = None;
 extern "C" {
     fn polones_display_draw(frame: Clamped<Vec<u8>>);
     fn polones_input_read_port_1() -> String;
+    fn polones_input_read_port_2() -> String;
 }
 
 #[wasm_bindgen]
@@ -69,39 +70,44 @@ impl Display for CanvasDisplay {
 
 struct WebInput {}
 
-impl Input for WebInput {
-    fn read_port_1(&mut self) -> polones_core::nes::PortState {
-        #[derive(Deserialize)]
-        #[serde(tag = "type")]
-        enum PortStateExternal {
-            #[serde(rename = "unplugged")]
-            Unplugged {},
-            #[serde(rename = "gamepad")]
-            Gamepad {
-                a: bool,
-                b: bool,
-                select: bool,
-                start: bool,
-                up: bool,
-                down: bool,
-                left: bool,
-                right: bool,
-            },
-        }
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum PortStateExternal {
+    #[serde(rename = "unplugged")]
+    Unplugged {},
+    #[serde(rename = "gamepad")]
+    Gamepad {
+        a: bool,
+        b: bool,
+        select: bool,
+        start: bool,
+        up: bool,
+        down: bool,
+        left: bool,
+        right: bool,
+    },
+}
 
-        let port_state_external_str = polones_input_read_port_1();
-        let port_state_external = serde_json::from_str(&port_state_external_str).unwrap();
-        match port_state_external {
-            PortStateExternal::Unplugged { .. } => {
-                PortState::Unplugged
-            }
-            PortStateExternal::Gamepad { a, b, select, start, up, down, left, right } => {
-                PortState::Gamepad { a, b, select, start, up, down, left, right }
-            }
+fn port_state_external_string_to_port_state(string: String) -> PortState {
+    let port_state_external = serde_json::from_str(&string).unwrap();
+    match port_state_external {
+        PortStateExternal::Unplugged { .. } => {
+            PortState::Unplugged
+        }
+        PortStateExternal::Gamepad { a, b, select, start, up, down, left, right } => {
+            PortState::Gamepad { a, b, select, start, up, down, left, right }
         }
     }
+}
 
-    fn read_port_2(&mut self) -> polones_core::nes::PortState {
-        PortState::Unplugged
+impl Input for WebInput {
+    fn read_port_1(&mut self) -> PortState {
+        let port_state_external_string = polones_input_read_port_1();
+        port_state_external_string_to_port_state(port_state_external_string)
+    }
+
+    fn read_port_2(&mut self) -> PortState {
+        let port_state_external_string = polones_input_read_port_2();
+        port_state_external_string_to_port_state(port_state_external_string)
     }
 }

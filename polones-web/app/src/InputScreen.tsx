@@ -1,28 +1,29 @@
 import React, { ChangeEvent, MouseEvent } from 'react';
-import { Gamepad, InputMapping, GamepadMapping } from './types';
+import { GamepadInput, GamepadInputMapping, InputMapping, InputMappings } from './types';
 
 import './InputScreen.css';
+import { InputContext } from './InputProvider';
 
-type Props = {
-  inputMapping: InputMapping,
-  onInputMappingChange?: (inputMapping: InputMapping) => void,
+type InputScreenProps = {
+  inputMappings: InputMappings,
+  onInputMappingsChange?: (inputMapping: InputMappings) => void,
   onClose?: () => void,
 }
 
 const DEFAULT_GAMEPAD_MAPPING = {
-  a: 'keyboard.g',
-  b: 'keyboard.f',
-  select: 'keyboard.r',
-  start: 'keyboard.t',
-  up: 'keyboard.w',
-  down: 'keyboard.s',
-  left: 'keyboard.a',
-  right: 'keyboard.d',
+  a: 'keyboard.key.g',
+  b: 'keyboard.key.f',
+  select: 'keyboard.key.r',
+  start: 'keyboard.key.t',
+  up: 'keyboard.key.w',
+  down: 'keyboard.key.s',
+  left: 'keyboard.key.a',
+  right: 'keyboard.key.d',
 };
 
 type GamepadScan = {
   current: 'a' | 'b' | 'select' | 'start' | 'up' | 'down' | 'left' | 'right',
-  usedKeys: { [key: string]: undefined },
+  usedPaths: Set<string>,
   a: null | string,
   b: null | string,
   select: null | string,
@@ -33,41 +34,87 @@ type GamepadScan = {
   right: null | string,
 }
 
-export default function InputScreen({ inputMapping, onInputMappingChange, onClose }: Props) {
-  let [gamepad1Scan, setGamepad1Scan] = React.useState<GamepadScan | null>(null);
-  let [gamepad1State, setGamepad1State] = React.useState<Gamepad | null>((() => {
-    if (inputMapping.port1.type === 'gamepad') {
+export default function InputScreen({
+  inputMappings,
+  onInputMappingsChange,
+  onClose
+}: InputScreenProps) {
+
+  let [remapping, setRemapping] = React.useState(false);
+
+  return (
+    <div className="inputScreenContainer">
+      <PortInput
+        name="1"
+        remapping={remapping}
+        setRemapping={setRemapping}
+        inputMapping={inputMappings.port1}
+        onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port1: im })}
+      />
+      <PortInput
+        name="2"
+        remapping={remapping}
+        setRemapping={setRemapping}
+        inputMapping={inputMappings.port2}
+        onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port2: im })}
+      />
+      <button type="button" onClick={onClose}>CLOSE</button>
+    </div>
+  );
+}
+
+type PortInputProps = {
+  name: string,
+  remapping: boolean,
+  setRemapping?: (remap: boolean) => void,
+  inputMapping: InputMapping,
+  onInputMappingChange?: (inputMapping: InputMapping) => void,
+}
+
+function PortInput({
+  name,
+  remapping,
+  setRemapping,
+  inputMapping,
+  onInputMappingChange
+}: PortInputProps) {
+
+  let input = React.useContext(InputContext);
+  let [gamepadScan, setGamepadScan] = React.useState<GamepadScan | null>(null);
+  let [gamepadState, setGamepadState] = React.useState<GamepadInput | null>((() => {
+    if (inputMapping.type === 'gamepad') {
       return {
         type: 'gamepad',
-        a: window.isPressed(inputMapping.port1.a),
-        b: window.isPressed(inputMapping.port1.b),
-        select: window.isPressed(inputMapping.port1.select),
-        start: window.isPressed(inputMapping.port1.start),
-        up: window.isPressed(inputMapping.port1.up),
-        down: window.isPressed(inputMapping.port1.down),
-        left: window.isPressed(inputMapping.port1.left),
-        right: window.isPressed(inputMapping.port1.right),
+        a: input.isPressed(inputMapping.a),
+        b: input.isPressed(inputMapping.b),
+        select: input.isPressed(inputMapping.select),
+        start: input.isPressed(inputMapping.start),
+        up: input.isPressed(inputMapping.up),
+        down: input.isPressed(inputMapping.down),
+        left: input.isPressed(inputMapping.left),
+        right: input.isPressed(inputMapping.right),
       };
     }
     return null;
   })());
 
-  function handlePort1TypeChange(e: ChangeEvent<HTMLSelectElement>) {
-    let value = e.target.value as unknown as typeof inputMapping.port1.type;
+  function handleMappingTypeChange(e: ChangeEvent<HTMLSelectElement>) {
+    setGamepadScan(null);
+    setRemapping?.(false);
+
+    let value = e.target.value as unknown as InputMapping["type"];
     if (value === 'unplugged') {
-      setGamepad1Scan(null);
-      onInputMappingChange?.({ port1: { type:'unplugged' }, port2: inputMapping.port2 });
+      onInputMappingChange?.({ type:'unplugged' });
     }
     if (value === 'gamepad') {
-      setGamepad1Scan(null);
-      onInputMappingChange?.({ port1: { type:'gamepad', ...DEFAULT_GAMEPAD_MAPPING }, port2: inputMapping.port2 });
+      onInputMappingChange?.({ type:'gamepad', ...DEFAULT_GAMEPAD_MAPPING });
     }
   }
 
-  function handleGamepad1RemapClick(e: MouseEvent<HTMLButtonElement>) {
-    setGamepad1Scan({
+  function handleGamepadRemapClick(e: MouseEvent<HTMLButtonElement>) {
+    setGamepadScan({
       current: 'left',
-      usedKeys: {},
+      usedPaths: new Set(),
       a: null,
       b: null,
       select: null,
@@ -77,36 +124,39 @@ export default function InputScreen({ inputMapping, onInputMappingChange, onClos
       left: null,
       right: null,
     });
+    setRemapping?.(true);
   }
 
   React.useEffect(() => {
-    if (gamepad1Scan) {
+    if (gamepadScan) {
       let id = { current: 0 };
       function handleAnimationFrame() {
-        function setKey(key: string) {
-          if (gamepad1Scan!.current === 'a') {
+        function setPath(path: string) {
+          if (gamepadScan!.current === 'a') {
             onInputMappingChange?.({
-              port1: {
-                type: 'gamepad',
-                a: key,
-                b: gamepad1Scan!.b!,
-                select: gamepad1Scan!.select!,
-                start: gamepad1Scan!.start!,
-                up: gamepad1Scan!.up!,
-                down: gamepad1Scan!.down!,
-                left: gamepad1Scan!.left!,
-                right: gamepad1Scan!.right!,
-              },
-              port2: inputMapping.port2,
+              type: 'gamepad',
+              a: path,
+              b: gamepadScan!.b!,
+              select: gamepadScan!.select!,
+              start: gamepadScan!.start!,
+              up: gamepadScan!.up!,
+              down: gamepadScan!.down!,
+              left: gamepadScan!.left!,
+              right: gamepadScan!.right!,
             });
-            setGamepad1Scan(null);
+            setGamepadScan(null);
+            setRemapping?.(false);
           } else {
-            setGamepad1Scan({
-              ...gamepad1Scan!,
-              [gamepad1Scan!.current]: key,
-              usedKeys: {...gamepad1Scan!.usedKeys, [key]: undefined},
+            setGamepadScan({
+              ...gamepadScan!,
+              [gamepadScan!.current]: path,
+              usedPaths: (() => {
+                const usedPaths = new Set(gamepadScan!.usedPaths);
+                usedPaths.add(path);
+                return usedPaths;
+              })(),
               current: (() => {
-                switch (gamepad1Scan!.current) {
+                switch (gamepadScan!.current) {
                   case 'left': return 'up';
                   case 'up': return 'right';
                   case 'right': return 'down';
@@ -119,63 +169,43 @@ export default function InputScreen({ inputMapping, onInputMappingChange, onClos
             });
           }
         }
-        buttons_scan:
-        do {
-          for (const key in window.keyboardState) {
-            if (window.keyboardState[key]) {
-              const k = `keyboard.${key}`;
-              if (!(k in gamepad1Scan!.usedKeys)) {
-                setKey(k);
-                break buttons_scan;
-              }
-            }
-          }
-          for (const gamepad of window.navigator.getGamepads()) {
-            if (!gamepad) continue;
-            for (const [index, button] of gamepad.buttons.entries()) {
-              if (button.pressed || button.value > 0.9) {
-                const k: string = `gamepad.${gamepad.id.replaceAll('.', '')}.button.${index}`;
-                if (!(k in gamepad1Scan!.usedKeys)) {
-                  setKey(k);
-                  break buttons_scan;
-                }
-              }
-            }
-          }
-        } while (false);
+        let path = input.firstPressedExcept(gamepadScan!.usedPaths);
+        if (path !== null) {
+          setPath(path);
+        }
         id.current = window.requestAnimationFrame(handleAnimationFrame);
       }
       id.current = window.requestAnimationFrame(handleAnimationFrame);
       return () => window.cancelAnimationFrame(id.current);
     }
-  }, [gamepad1Scan, inputMapping, onInputMappingChange]);
+  }, [gamepadScan, inputMapping, onInputMappingChange, setRemapping, input]);
 
   React.useEffect(() => {
-    if (inputMapping.port1.type === 'gamepad') {
+    if (inputMapping.type === 'gamepad') {
       let id = { current: 0 };
       function handleAnimationFrame() {
-        let gamepadMapping = inputMapping.port1 as unknown as GamepadMapping;
-        let newState: Gamepad = {
+        let gamepadMapping = inputMapping as unknown as GamepadInputMapping;
+        let newState: GamepadInput = {
           type: 'gamepad',
-          a: window.isPressed(gamepadMapping.a),
-          b: window.isPressed(gamepadMapping.b),
-          select: window.isPressed(gamepadMapping.select),
-          start: window.isPressed(gamepadMapping.start),
-          up: window.isPressed(gamepadMapping.up),
-          down: window.isPressed(gamepadMapping.down),
-          left: window.isPressed(gamepadMapping.left),
-          right: window.isPressed(gamepadMapping.right),
+          a: input.isPressed(gamepadMapping.a),
+          b: input.isPressed(gamepadMapping.b),
+          select: input.isPressed(gamepadMapping.select),
+          start: input.isPressed(gamepadMapping.start),
+          up: input.isPressed(gamepadMapping.up),
+          down: input.isPressed(gamepadMapping.down),
+          left: input.isPressed(gamepadMapping.left),
+          right: input.isPressed(gamepadMapping.right),
         };
-        if (gamepad1State) {
-          for (const key in gamepad1State) {
-            let k = key as unknown as keyof Gamepad;
-            if (gamepad1State[k] !== newState[k]) {
-              setGamepad1State(newState);
+        if (gamepadState) {
+          for (const key in gamepadState) {
+            let k = key as unknown as keyof GamepadInput;
+            if (gamepadState[k] !== newState[k]) {
+              setGamepadState(newState);
               break;
             }
           }
         } else {
-          setGamepad1State(newState);
+          setGamepadState(newState);
         }
 
         id.current = window.requestAnimationFrame(handleAnimationFrame);
@@ -183,14 +213,14 @@ export default function InputScreen({ inputMapping, onInputMappingChange, onClos
       id.current = window.requestAnimationFrame(handleAnimationFrame);
       return () => window.cancelAnimationFrame(id.current);
     }
-  }, [inputMapping.port1, gamepad1State]);
+  }, [inputMapping, gamepadState, input]);
 
-  function buttonHighlight(button: keyof Gamepad) {
-    if (gamepad1Scan) {
-      return gamepad1Scan.current === button;
+  function buttonHighlight(button: keyof GamepadInput) {
+    if (gamepadScan) {
+      return gamepadScan.current === button;
     }
-    else if (gamepad1State) {
-      return gamepad1State[button];
+    else if (gamepadState) {
+      return gamepadState[button];
     }
     else {
       return false;
@@ -198,18 +228,16 @@ export default function InputScreen({ inputMapping, onInputMappingChange, onClos
   }
 
   return (
-    <div className="inputScreenContainer">
-      <div>
-        <span>Port 1: </span>
-        <select value={inputMapping.port1.type} onChange={handlePort1TypeChange}>
-          <option value="unplugged">Unplugged</option>
-          <option value="gamepad">Gamepad</option>
-        </select>
-        {inputMapping.port1.type === 'gamepad' && (
-          <button type="button" onClick={handleGamepad1RemapClick} disabled={!!gamepad1Scan}>Remap</button>
-        )}
-      </div>
-      {inputMapping.port1.type === 'gamepad' && (
+    <div>
+      <span>Port {name}: </span>
+      <select value={inputMapping.type} onChange={handleMappingTypeChange}>
+        <option value="unplugged">Unplugged</option>
+        <option value="gamepad">Gamepad</option>
+      </select>
+      {inputMapping.type === 'gamepad' && (
+        <button type="button" onClick={handleGamepadRemapClick} disabled={remapping}>Remap</button>
+      )}
+      {inputMapping.type === 'gamepad' && (
         <div className="gamepad">
           <div className={`gamepad-button round a ${buttonHighlight('a') ? 'highlight' : ''}`}></div>
           <div className={`gamepad-button round b ${buttonHighlight('b') ? 'highlight' : ''}`}></div>
@@ -221,7 +249,6 @@ export default function InputScreen({ inputMapping, onInputMappingChange, onClos
           <div className={`gamepad-button directional right ${buttonHighlight('right') ? 'highlight' : ''}`}></div>
         </div>
       )}
-      <button type="button" onClick={onClose}>CLOSE</button>
     </div>
   );
 }

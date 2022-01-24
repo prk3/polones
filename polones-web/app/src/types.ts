@@ -1,14 +1,16 @@
 
-export type Input = {
-  port1: Gamepad | Unplugged,
-  port2: Gamepad | Unplugged,
+export type Inputs = {
+  port1: Input,
+  port2: Input,
 };
 
-export type Unplugged = {
+export type Input = UnpluggedInput | GamepadInput;
+
+export type UnpluggedInput = {
   type: 'unplugged',
 };
 
-export type Gamepad = {
+export type GamepadInput = {
   type: 'gamepad',
   a: boolean,
   b: boolean,
@@ -20,16 +22,18 @@ export type Gamepad = {
   right: boolean,
 };
 
-export type InputMapping = {
-  port1: GamepadMapping | UnpluggedMapping,
-  port2: GamepadMapping | UnpluggedMapping,
+export type InputMappings = {
+  port1: InputMapping,
+  port2: InputMapping,
 };
 
-export type UnpluggedMapping = {
+export type InputMapping = UnpluggedInputMapping | GamepadInputMapping;
+
+export type UnpluggedInputMapping = {
   type: 'unplugged',
 };
 
-export type GamepadMapping = {
+export type GamepadInputMapping = {
   type: 'gamepad',
   a: string,
   b: string,

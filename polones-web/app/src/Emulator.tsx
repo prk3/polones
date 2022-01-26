@@ -23,7 +23,7 @@ const DEFAULT_MAPPINGS: InputMappings = {
   },
 };
 
-export default function App() {
+export default function Emulator() {
   const input = React.useContext(InputContext);
   const polones = React.useContext(PolonesWebContext);
 

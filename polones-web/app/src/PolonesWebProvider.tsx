@@ -22,7 +22,7 @@ export default function PolonesWebProvider(props: { children: any }) {
       .catch(error => {
         console.error(error);
       });
-  });
+  }, []);
 
   if (moduleRef.current === null) {
     return (<div>loading polones web wasm module</div>);

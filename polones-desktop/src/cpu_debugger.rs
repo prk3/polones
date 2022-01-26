@@ -339,8 +339,8 @@ impl SdlCpuDebugger {
         }
     }
 
-    fn fill_instructions(&mut self, nes: &Nes) {
-        let cpu = nes.cpu.borrow();
+    fn fill_instructions(&mut self, nes: &mut Nes) {
+        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let mut position = cpu.program_counter;
 
         for _ in 0..16 {
@@ -359,7 +359,7 @@ impl SdlCpuDebugger {
                     break;
                 }
                 DisassemblyValue::Unknown => {
-                    let opcode = nes.cpu_bus_read(position);
+                    let opcode = cpu_bus.read(position);
                     let (operation, mode) = Self::DISASSEMBLY_TABLE[opcode as usize];
 
                     if operation == Operation::XXX {
@@ -376,14 +376,14 @@ impl SdlCpuDebugger {
                         Immediate | XIndexedIndirect | IndirectYIndexed | Relative | Zeropage
                         | ZeropageXIndexed | ZeropageYIndexed => {
                             self.disassembly[(position + 1) as usize] =
-                                DisassemblyValue::Value(nes.cpu_bus_read(position + 1));
+                                DisassemblyValue::Value(cpu_bus.read(position + 1));
                             position += 2;
                         }
                         Absolute | AbsoluteXIndexed | AbsoluteYIndexed | Indirect => {
                             self.disassembly[(position + 1) as usize] =
-                                DisassemblyValue::Value(nes.cpu_bus_read(position + 1));
+                                DisassemblyValue::Value(cpu_bus.read(position + 1));
                             self.disassembly[(position + 2) as usize] =
-                                DisassemblyValue::Value(nes.cpu_bus_read(position + 2));
+                                DisassemblyValue::Value(cpu_bus.read(position + 2));
                             position += 3;
                         }
                     }
@@ -392,7 +392,7 @@ impl SdlCpuDebugger {
         }
     }
 
-    pub fn handle_event(&mut self, event: Event, nes: &Nes, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, event: Event, nes: &mut Nes, state: &mut EmulatorState) {
         if self.breakpoint_mode {
             match event {
                 Event::Quit { .. } => {
@@ -514,19 +514,20 @@ impl SdlCpuDebugger {
         }
     }
 
-    pub fn update(&mut self, nes: &Nes) {
+    pub fn update(&mut self, nes: &mut Nes) {
         self.fill_instructions(nes);
     }
 
-    pub fn show(&mut self, nes: &Nes) {
+    pub fn show(&mut self, nes: &mut Nes) {
+        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+
         self.canvas.clear();
         self.text_area.clear();
-        let cpu = nes.cpu.borrow();
         let ta = &mut self.text_area;
 
         {
-            let low = nes.borrow().cpu_bus_read(0xFFFA);
-            let high = nes.borrow().cpu_bus_read(0xFFFB);
+            let low = cpu_bus.read(0xFFFA);
+            let high = cpu_bus.read(0xFFFB);
             self.nmi_breakpoint = ((high as u16) << 8) | low as u16;
         }
 

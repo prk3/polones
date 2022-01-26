@@ -39,11 +39,12 @@ impl SdlGraphicsDebugger {
         }
     }
 
-    pub fn show(&mut self, nes: &Nes) {
+    pub fn show(&mut self, nes: &mut Nes) {
+        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+        let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+
         if self.mode == 1 || self.mode == 2 {
-            let nt = nes
-                .ppu
-                .borrow()
+            let nt = ppu
                 .control_register
                 .get_background_tile_select() as u16;
 
@@ -55,24 +56,24 @@ impl SdlGraphicsDebugger {
                             for yc in 0..30usize {
                                 for yf in 0..8usize {
                                     for xc in 0..32usize {
-                                        let index = nes.ppu_bus_read(
+                                        let index = ppu_bus.read(
                                             (0x2000 + yn * 0x0800 + xn * 0x0400 + yc * 32 + xc)
                                                 as u16,
                                         );
-                                        let mut low = nes.ppu_bus_read(
+                                        let mut low = ppu_bus.read(
                                             (nt << 12)
                                                 | (index as u16 >> 0 << 4)
                                                 | (0b0000)
                                                 | (yf as u16),
                                         );
-                                        let mut high = nes.ppu_bus_read(
+                                        let mut high = ppu_bus.read(
                                             (nt << 12)
                                                 | (index as u16 >> 0 << 4)
                                                 | (0b1000)
                                                 | (yf as u16),
                                         );
 
-                                        let attribute_byte = nes.ppu_bus_read(
+                                        let attribute_byte = ppu_bus.read(
                                             ((0x23C0 + yn * 0x0800 + xn * 0x0400)
                                                 | (yc >> 2 << 3)
                                                 | (xc >> 2))
@@ -91,10 +92,10 @@ impl SdlGraphicsDebugger {
 
                                             let (r, g, b) = if self.mode == 1 {
                                                 if ((high >> 7 << 1) | low >> 7) == 0 {
-                                                    PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                                                    PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111)
                                                         as usize]
                                                 } else {
-                                                    let b = nes.ppu_bus_read(
+                                                    let b = ppu_bus.read(
                                                         0x3F00
                                                             + ((attribute as u16) << 2)
                                                             + (((high as u16) >> 7 << 1)
@@ -138,10 +139,10 @@ impl SdlGraphicsDebugger {
                         for yc in 0..16usize {
                             for xc in 0..16usize {
                                 for yf in 0..8usize {
-                                    let mut low = nes.ppu_bus_read(
+                                    let mut low = ppu_bus.read(
                                         ((pt << 12) | (yc << 8) | (xc << 4) | (0b0000) | yf) as u16,
                                     );
-                                    let mut high = nes.ppu_bus_read(
+                                    let mut high = ppu_bus.read(
                                         ((pt << 12) | (yc << 8) | (xc << 4) | (0b1000) | yf) as u16,
                                     );
                                     for xf in 0..8 {
@@ -153,10 +154,10 @@ impl SdlGraphicsDebugger {
 
                                         let (r, g, b) = if self.mode == 3 {
                                             if ((high >> 7 << 1) | low >> 7) == 0 {
-                                                PALLETTE[(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                                                PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111)
                                                     as usize]
                                             } else {
-                                                let b = nes.ppu_bus_read(
+                                                let b = ppu_bus.read(
                                                     0x3F00
                                                         + ((self.pattern_palette as u16) << 2)
                                                         + (((high as u16) >> 7 << 1)
@@ -215,7 +216,6 @@ impl SdlGraphicsDebugger {
                     }
 
                     // draw sprites in oam (if sprites are 8 pixels tall)
-                    let ppu = nes.ppu.borrow();
                     if !ppu.control_register.get_sprite_height() {
                         for yc in 0..8usize {
                             for yf in 0..8usize {
@@ -226,13 +226,13 @@ impl SdlGraphicsDebugger {
                                     let pt = ppu.control_register.get_sprite_tile_select() as u8;
                                     let tile = index;
 
-                                    let mut low = nes.ppu_bus_read(
+                                    let mut low = ppu_bus.read(
                                         ((pt as u16) << 12)
                                             | ((tile as u16) << 4)
                                             | (0b0000)
                                             | yf as u16,
                                     );
-                                    let mut high = nes.ppu_bus_read(
+                                    let mut high = ppu_bus.read(
                                         ((pt as u16) << 12)
                                             | ((tile as u16) << 4)
                                             | (0b1000)
@@ -242,9 +242,9 @@ impl SdlGraphicsDebugger {
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
                                             PALLETTE
-                                                [(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
+                                                [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
-                                            let b = nes.ppu_bus_read(
+                                            let b = ppu_bus.read(
                                                 0x3F10
                                                     + ((palette as u16) << 2)
                                                     + (((high as u16) >> 7 << 1) | low as u16 >> 7),
@@ -299,13 +299,13 @@ impl SdlGraphicsDebugger {
                                         index | 0b00000001
                                     };
 
-                                    let mut low = nes.ppu_bus_read(
+                                    let mut low = ppu_bus.read(
                                         ((pt as u16) << 12)
                                             | ((tile as u16) << 4)
                                             | (0b0000)
                                             | (yf & 0b111) as u16,
                                     );
-                                    let mut high = nes.ppu_bus_read(
+                                    let mut high = ppu_bus.read(
                                         ((pt as u16) << 12)
                                             | ((tile as u16) << 4)
                                             | (0b1000)
@@ -315,9 +315,9 @@ impl SdlGraphicsDebugger {
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
                                             PALLETTE
-                                                [(nes.ppu_bus_read(0x3F00) & 0b00111111) as usize]
+                                                [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
-                                            let b = nes.ppu_bus_read(
+                                            let b = ppu_bus.read(
                                                 0x3F10
                                                     + ((palette as u16) << 2)
                                                     + (((high as u16) >> 7 << 1) | low as u16 >> 7),
@@ -379,7 +379,7 @@ impl SdlGraphicsDebugger {
                         for yf in 0..8usize {
                             for xc in 0..4usize {
                                 let byte =
-                                    nes.ppu_bus_read(0x3F00 | ((yc as u16) << 2) | xc as u16);
+                                    ppu_bus.read(0x3F00 | ((yc as u16) << 2) | xc as u16);
                                 let (r, g, b) = PALLETTE[byte as usize & 0b00111111];
                                 for xf in 0..8 {
                                     let i = (512 * 8)
@@ -415,7 +415,7 @@ impl SdlGraphicsDebugger {
         self.canvas.present();
     }
 
-    pub fn handle_event(&mut self, event: Event, _nes: &Nes, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
         match event {
             Event::Quit { .. } => {
                 state.exit = true;

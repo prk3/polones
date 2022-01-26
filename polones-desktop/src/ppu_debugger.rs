@@ -35,11 +35,13 @@ impl SdlPpuDebugger {
         }
     }
 
-    pub fn show(&mut self, nes: &Nes) {
+    pub fn show(&mut self, nes: &mut Nes) {
+        let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+        let (ppu, _ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+
         self.canvas.clear();
         self.text_area.clear();
         let ta = &mut self.text_area;
-        let ppu = nes.ppu.borrow();
 
         ta.write_str_with_color("SCANLINE", 0, 0, Yellow);
         ta.write_u16_with_color(ppu.scanline, 0, 9, White);
@@ -173,7 +175,7 @@ impl SdlPpuDebugger {
         self.canvas.present();
     }
 
-    pub fn handle_event(&mut self, event: Event, _nes: &Nes, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
         match event {
             Event::Quit { .. } => {
                 state.exit = true;

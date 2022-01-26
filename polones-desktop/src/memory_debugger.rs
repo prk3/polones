@@ -47,7 +47,8 @@ impl SdlMemoryDebugger {
         }
     }
 
-    pub fn show(&mut self, nes: &Nes) {
+    pub fn show(&mut self, nes: &mut Nes) {
+        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let ta = &mut self.text_area;
         ta.clear();
 
@@ -94,12 +95,13 @@ impl SdlMemoryDebugger {
                 self.text_area.write_u8_with_color(
                     match self.page {
                         0x00..=0xFF => {
-                            nes.cpu_bus_read((256 * self.page) + (y as u16 * 16) + x as u16)
+                            cpu_bus.read((256 * self.page) + (y as u16 * 16) + x as u16)
                         }
                         0x100..=0x13F => {
-                            nes.ppu_bus_read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)
+                            let (_, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+                            ppu_bus.read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)
                         }
-                        0x140 => nes.ppu.borrow().oam[y as usize * 16 + x as usize],
+                        0x140 => cpu_bus.ppu.oam[y as usize * 16 + x as usize],
                         _ => unreachable!(),
                     },
                     3 + y * 2,
@@ -110,31 +112,31 @@ impl SdlMemoryDebugger {
         }
 
         if self.page == 0x01 {
-            let sp = nes.cpu.borrow().stack_pointer;
+            let sp = cpu.stack_pointer;
             let y = sp >> 4;
             let x = sp & 0x0F;
             self.text_area.write_u8_with_color(
-                nes.cpu_bus_read(0x0100 + (y as u16 * 16) + x as u16),
+                cpu_bus.read(0x0100 + (y as u16 * 16) + x as u16),
                 3 + y * 2,
                 1 + x * 3,
                 Magenta,
             );
         }
 
-        if self.page == nes.cpu.borrow().program_counter & 0xFF00 {
-            let pc = nes.cpu.borrow().program_counter;
+        if self.page == cpu.program_counter & 0xFF00 {
+            let pc = cpu.program_counter;
             let y = pc as u8 >> 4;
             let x = pc as u8 & 0x0F;
             self.text_area
-                .write_u8_with_color(nes.cpu_bus_read(pc), 3 + y * 2, 1 + x * 3, Red);
+                .write_u8_with_color(cpu_bus.read(pc), 3 + y * 2, 1 + x * 3, Red);
         }
 
         if self.page == 0x140 {
-            let address = nes.ppu.borrow().oam_address;
+            let address = cpu_bus.ppu.oam_address;
             let y = address >> 4;
             let x = address & 0x0F;
             self.text_area.write_u8_with_color(
-                nes.ppu.borrow().oam[address as usize],
+                cpu_bus.ppu.oam[address as usize],
                 3 + y * 2,
                 1 + x * 3,
                 Magenta,
@@ -162,7 +164,7 @@ impl SdlMemoryDebugger {
         self.canvas.present();
     }
 
-    pub fn handle_event(&mut self, event: Event, _nes: &Nes, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
         let page_ranges = [0x00..=0x19, 0x80..=0x140];
         match event {
             Event::Quit { .. } => {

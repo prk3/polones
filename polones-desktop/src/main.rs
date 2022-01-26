@@ -83,7 +83,7 @@ impl SdlGameWindow {
         }
     }
 
-    fn handle_event(&mut self, event: Event, _nes: &Nes, state: &mut EmulatorState) {
+    fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
         match event {
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::Escape),
@@ -432,17 +432,17 @@ fn main() {
     game_window.borrow_mut().show();
 
     if let Some((_id, debugger)) = &mut cpu_debugger {
-        debugger.update(&nes);
-        debugger.show(&nes);
+        debugger.update(&mut nes);
+        debugger.show(&mut nes);
     }
     if let Some((_id, debugger)) = &mut ppu_debugger {
-        debugger.show(&nes);
+        debugger.show(&mut nes);
     }
     if let Some((_id, debugger)) = &mut memory_debugger {
-        debugger.show(&nes);
+        debugger.show(&mut nes);
     }
     if let Some((_id, debugger)) = &mut graphics_debugger {
-        debugger.show(&nes);
+        debugger.show(&mut nes);
     }
 
     loop {
@@ -453,33 +453,33 @@ fn main() {
             if event.get_window_id() == Some(game_window_id) {
                 game_window
                     .borrow_mut()
-                    .handle_event(event, &nes, &mut state);
+                    .handle_event(event, &mut nes, &mut state);
                 continue;
             }
             match &mut cpu_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &nes, &mut state);
+                    debugger.handle_event(event, &mut nes, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut ppu_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &nes, &mut state);
+                    debugger.handle_event(event, &mut nes, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut memory_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &nes, &mut state);
+                    debugger.handle_event(event, &mut nes, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut graphics_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &nes, &mut state);
+                    debugger.handle_event(event, &mut nes, &mut state);
                     continue;
                 }
                 _ => {}
@@ -493,22 +493,22 @@ fn main() {
         if !state.running && state.one_step {
             nes.run_one_cpu_instruction();
             if let Some((_id, debugger)) = &mut cpu_debugger {
-                debugger.update(&nes);
+                debugger.update(&mut nes);
             }
             state.one_step = false;
         } else if state.running {
             for _ in 0..29829 {
                 nes.run_one_cpu_tick();
                 if let Some((_id, debugger)) = &mut cpu_debugger {
-                    debugger.update(&nes);
+                    debugger.update(&mut nes);
 
                     if debugger
                         .breakpoints
-                        .contains(&nes.cpu.borrow().program_counter)
+                        .contains(&nes.cpu.program_counter)
                     {
-                        while !nes.cpu.borrow().finished_instruction() {
+                        while !nes.cpu.finished_instruction() {
                             nes.run_one_cpu_tick();
-                            debugger.update(&nes);
+                            debugger.update(&mut nes);
                         }
                         state.running = false;
                         break;
@@ -519,16 +519,16 @@ fn main() {
 
         game_window.borrow_mut().show();
         if let Some((_id, debugger)) = &mut cpu_debugger {
-            debugger.show(&nes);
+            debugger.show(&mut nes);
         }
         if let Some((_id, debugger)) = &mut ppu_debugger {
-            debugger.show(&nes);
+            debugger.show(&mut nes);
         }
         if let Some((_id, debugger)) = &mut memory_debugger {
-            debugger.show(&nes);
+            debugger.show(&mut nes);
         }
         if let Some((_id, debugger)) = &mut graphics_debugger {
-            debugger.show(&nes);
+            debugger.show(&mut nes);
         }
 
         // 60fps

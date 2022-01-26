@@ -1,4 +1,5 @@
-use crate::nes::{Frame, Nes};
+use crate::cpu::Cpu;
+use crate::nes::{Frame, Nes, Display, PpuBus};
 
 pub static PALLETTE: [(u8, u8, u8); 64] = [
     (0x65, 0x65, 0x65),
@@ -221,10 +222,12 @@ pub struct Ppu {
     sprite_0_current_scanline: bool,
     sprites_next_frame: usize,
     sprites_current_frame: usize,
+
+    display: Box<dyn Display>,
 }
 
 impl Ppu {
-    pub fn new() -> Self {
+    pub fn new(display: Box<dyn Display>) -> Self {
         Self {
             scanline: 0,
             dot: 0,
@@ -268,16 +271,18 @@ impl Ppu {
             sprite_0_current_scanline: false,
             sprites_next_frame: 0,
             sprites_current_frame: 0,
+
+            display,
         }
     }
 
-    pub fn tick(&mut self, nes: &Nes) {
+    pub fn tick(&mut self, cpu: &mut Cpu, ppu_bus: &mut PpuBus) {
         // vblank start
         if self.scanline == 241 && self.dot == 1 {
             self.vblank = true;
             self.status_register.set_vblank_flag(true);
             if self.control_register.get_nmi_enable() {
-                nes.cpu.borrow_mut().nmi();
+                cpu.nmi();
             }
         }
         // vblank end
@@ -358,11 +363,11 @@ impl Ppu {
             match nth % 8 {
                 0 => {
                     // garbage NT read
-                    nes.ppu_bus_read(0x2000);
+                    ppu_bus.read(0x2000);
                 }
                 2 => {
                     // garbage AT read
-                    nes.ppu_bus_read(0x23C0);
+                    ppu_bus.read(0x23C0);
                     self.sprite_attributes[sprite_number] =
                         self.sprite_secondary_oam[sprite_number * 4 + 2];
                 }
@@ -371,10 +376,10 @@ impl Ppu {
                         self.sprite_secondary_oam[sprite_number * 4 + 3];
                 }
                 4 => {
-                    self.set_oam_pattern(nes, sprite_number, false);
+                    self.set_oam_pattern(ppu_bus, sprite_number, false);
                 }
                 6 => {
-                    self.set_oam_pattern(nes, sprite_number, true);
+                    self.set_oam_pattern(ppu_bus, sprite_number, true);
                 }
                 _ => {}
             }
@@ -384,8 +389,8 @@ impl Ppu {
             for sprite_number in 8..self.sprite_limit {
                 self.sprite_counters[sprite_number] =
                     self.sprite_secondary_oam[sprite_number * 4 + 3];
-                self.set_oam_pattern(nes, sprite_number, false);
-                self.set_oam_pattern(nes, sprite_number, true);
+                self.set_oam_pattern(ppu_bus, sprite_number, false);
+                self.set_oam_pattern(ppu_bus, sprite_number, true);
             }
             self.sprite_0_current_scanline = self.sprite_0_next_scanline;
             self.sprites_current_frame = self.sprites_next_frame;
@@ -449,7 +454,6 @@ impl Ppu {
                             let color_low = self.sprite_patterns_low[i] >> 7;
                             let color_high = self.sprite_patterns_high[i] >> 7;
                             if color_low != 0 || color_high != 0 {
-                                // check sprite 0 hit
                                 let color = (color_high << 1) | color_low;
                                 let palette = self.sprite_attributes[i] & 0b11;
                                 let priority_back = (self.sprite_attributes[i] >> 5) & 1 == 1;
@@ -459,18 +463,18 @@ impl Ppu {
                         }
                     }
                 }
-                let get_bg_color = |color: u8, palette: u8| {
+                let get_bg_color = |ppu_bus: &mut PpuBus, color: u8, palette: u8| {
                     if color == 0b00 {
-                        nes.ppu_bus_read(0x3F00) & 0b00111111
+                        ppu_bus.read(0x3F00) & 0b00111111
                     } else {
-                        nes.ppu_bus_read(0x3F00 | (palette << 2) as u16 | color as u16) & 0b00111111
+                        ppu_bus.read(0x3F00 | (palette << 2) as u16 | color as u16) & 0b00111111
                     }
                 };
-                let get_fg_color = |color: u8, palette: u8| {
+                let get_fg_color = |ppu_bus: &mut PpuBus, color: u8, palette: u8| {
                     if color == 0b00 {
-                        nes.ppu_bus_read(0x3F10) & 0b00111111
+                        ppu_bus.read(0x3F10) & 0b00111111
                     } else {
-                        nes.ppu_bus_read(0x3F10 | (palette << 2) as u16 | color as u16) & 0b00111111
+                        ppu_bus.read(0x3F10 | (palette << 2) as u16 | color as u16) & 0b00111111
                     }
                 };
                 let get_rgb = |color: u8| PALLETTE[color as usize];
@@ -492,23 +496,23 @@ impl Ppu {
                         }
 
                         if (!fg_priority_back && fg_color != 0) || bg_color == 0 {
-                            get_rgb(get_fg_color(fg_color, fg_palette))
+                            get_rgb(get_fg_color(ppu_bus, fg_color, fg_palette))
                         } else {
-                            get_rgb(get_bg_color(bg_color, bg_palette))
+                            get_rgb(get_bg_color(ppu_bus, bg_color, bg_palette))
                         }
                     }
                     (Some((fg_color, fg_palette, _fg_priority, _sprite_index)), None) => {
-                        get_rgb(get_fg_color(fg_color, fg_palette))
+                        get_rgb(get_fg_color(ppu_bus, fg_color, fg_palette))
                     }
                     (None, Some((bg_color, bg_palette))) => {
-                        get_rgb(get_bg_color(bg_color, bg_palette))
+                        get_rgb(get_bg_color(ppu_bus, bg_color, bg_palette))
                     }
                     (None, None) => {
                         let ppu_addr = self.v.get_ppu_address() & 0b00111111_11111111;
                         if ppu_addr >= 0x3F00 {
-                            get_rgb(nes.ppu_bus_read(ppu_addr) & 0b00111111)
+                            get_rgb(ppu_bus.read(ppu_addr) & 0b00111111)
                         } else {
-                            get_rgb(nes.ppu_bus_read(0x3F00) & 0b00111111)
+                            get_rgb(ppu_bus.read(0x3F00) & 0b00111111)
                         }
                     }
                 };
@@ -519,7 +523,7 @@ impl Ppu {
             if (1..=256).contains(&self.dot) || (321..=336).contains(&self.dot) {
                 match (self.dot - 1) % 8 {
                     0 => {
-                        self.nametable_byte = nes.ppu_bus_read(0x2000 | (self.v.0 & 0x0FFF));
+                        self.nametable_byte = ppu_bus.read(0x2000 | (self.v.0 & 0x0FFF));
                     }
                     2 => {
                         // NN 1111 YYY XXX
@@ -527,7 +531,7 @@ impl Ppu {
                         // || |||| +++------ high 3 bits of coarse Y (y/4)
                         // || ++++---------- attribute offset (960 bytes)
                         // ++--------------- nametable select
-                        let attribute_byte = nes.ppu_bus_read(
+                        let attribute_byte = ppu_bus.read(
                             0x2000 | // nametables starting address
                             (self.v.get_nametable_select() as u16 >> 0 << 10) | // nametable select
                             0x03C0 | // attribute offset
@@ -547,7 +551,7 @@ impl Ppu {
                         // ||++++---------- R: Tile row
                         // |+-------------- H: Half of sprite table (0: "left"; 1: "right")
                         // +--------------- 0: Pattern table is at $0000-$1FFF
-                        self.bg_tile_byte_low = nes.ppu_bus_read(
+                        self.bg_tile_byte_low = ppu_bus.read(
                             self.control_register.get_background_tile_select() as u16 >> 0 << 12
                                 | self.nametable_byte as u16 >> 0 << 4
                                 | self.v.get_fine_y_scroll() as u16,
@@ -555,7 +559,7 @@ impl Ppu {
                     }
                     6 => {
                         // same as above, but with plane bit set
-                        self.bg_tile_byte_high = nes.ppu_bus_read(
+                        self.bg_tile_byte_high = ppu_bus.read(
                             self.control_register.get_background_tile_select() as u16 >> 0 << 12
                                 | self.nametable_byte as u16 >> 0 << 4
                                 | 0b1000
@@ -586,7 +590,7 @@ impl Ppu {
                 }
             }
             if (337..=339).contains(&self.dot) {
-                self.nametable_byte = nes.ppu_bus_read(0x2000 + (self.v.0 & 0x0FFF));
+                self.nametable_byte = ppu_bus.read(0x2000 + (self.v.0 & 0x0FFF));
             }
         }
 
@@ -595,7 +599,7 @@ impl Ppu {
             self.buffer_index = 0;
             let mut buffer = Box::new([[(0, 0, 0); 256]; 240]);
             std::mem::swap(&mut buffer, &mut self.buffer);
-            nes.display.borrow_mut().draw(buffer);
+            self.display.draw(buffer);
         }
 
         if self.dot == 257 {}
@@ -631,7 +635,7 @@ impl Ppu {
         }
     }
 
-    pub fn cpu_read(&mut self, nes: &Nes, address: u16) -> u8 {
+    pub fn read(&mut self, address: u16, ppu_bus: &mut PpuBus) -> u8 {
         match 0x2000 + (address & 0x0007) {
             0x2002 => {
                 let result = self.status_register.0;
@@ -647,15 +651,15 @@ impl Ppu {
                 // read buffer and return the previous value from the buffer.
                 if self.v.get_ppu_address() & 0x3FFF < 0x3F00 {
                     result = self.ppu_read_buffer;
-                    self.ppu_read_buffer = nes.ppu_bus_read(self.v.get_ppu_address());
+                    self.ppu_read_buffer = ppu_bus.read(self.v.get_ppu_address());
                 } else {
-                    result = nes.ppu_bus_read(self.v.get_ppu_address());
+                    result = ppu_bus.read(self.v.get_ppu_address());
                     // Reads from palette area fill the PPU read buffer with
                     // that's "behind" palette memory - nametable data. Because
                     // that these addresses are mapped to the palette RAM, we
                     // decrement the address to read from lower mirror of nametables.
                     self.ppu_read_buffer =
-                        nes.ppu_bus_read((self.v.get_ppu_address() & 0x3FFF) - 0x1000);
+                        ppu_bus.read((self.v.get_ppu_address() & 0x3FFF) - 0x1000);
                 }
 
                 self.v.set_ppu_address(
@@ -672,7 +676,7 @@ impl Ppu {
         }
     }
 
-    pub fn cpu_write(&mut self, nes: &Nes, address: u16, value: u8) {
+    pub fn write(&mut self, address: u16, value: u8, ppu_bus: &mut PpuBus) {
         match 0x2000 + (address & 0x0007) {
             0x2000 => {
                 let old_control_register = self.control_register;
@@ -716,7 +720,7 @@ impl Ppu {
                 self.w = !self.w;
             }
             0x2007 => {
-                nes.ppu_bus_write(self.v.get_ppu_address() & 0b0011_1111_1111_1111, value);
+                ppu_bus.write(self.v.get_ppu_address() & 0b0011_1111_1111_1111, value);
                 self.v.set_ppu_address(
                     (self.v.get_ppu_address()
                         + (1 << (self.control_register.get_increment_mode() as u8 * 5)))
@@ -760,7 +764,7 @@ impl Ppu {
         }
     }
 
-    fn set_oam_pattern(&mut self, nes: &Nes, sprite_number: usize, pattern_high: bool) {
+    fn set_oam_pattern(&mut self, ppu_bus: &mut PpuBus, sprite_number: usize, pattern_high: bool) {
         let y = self.sprite_secondary_oam[sprite_number * 4 + 0] as u16;
         let index = self.sprite_secondary_oam[sprite_number * 4 + 1];
         let x = self.sprite_secondary_oam[sprite_number * 4 + 3];
@@ -816,7 +820,7 @@ impl Ppu {
         // ||++++---------- R: Tile row
         // |+-------------- H: Half of sprite table (0: "left"; 1: "right")
         // +--------------- 0: Pattern table is at $0000-$1FFF
-        let tile_row = nes.ppu_bus_read(
+        let tile_row = ppu_bus.read(
             (character_table as u16) << 12
                 | (tile_offset as u16) << 4
                 | (pattern_high as u16) << 3

@@ -1,5 +1,5 @@
 use crate::cpu::Cpu;
-use crate::nes::{Frame, Nes, Display, PpuBus};
+use crate::nes::{Display, Frame, PpuBus};
 
 pub static PALLETTE: [(u8, u8, u8); 64] = [
     (0x65, 0x65, 0x65),
@@ -150,25 +150,25 @@ impl Loopy {
         self.0 as u8 & 0b11111
     }
     pub fn set_coarse_x_scroll(&mut self, new: u8) {
-        self.0 = (self.0 & 0b111_11_11111_00000) | (new as u16 & 0b11111);
+        self.0 = (self.0 & 0b111_1111_1110_0000) | (new as u16 & 0b11111);
     }
     pub fn get_coarse_y_scroll(&self) -> u8 {
         (self.0 >> 5) as u8 & 0b11111
     }
     pub fn set_coarse_y_scroll(&mut self, new: u8) {
-        self.0 = (self.0 & 0b111_11_00000_11111) | ((new as u16 & 0b11111) << 5);
+        self.0 = (self.0 & 0b111_1100_0001_1111) | ((new as u16 & 0b11111) << 5);
     }
     pub fn get_nametable_select(&self) -> u8 {
         (self.0 >> 10) as u8 & 0b11
     }
     pub fn set_nametable_select(&mut self, new: u8) {
-        self.0 = (self.0 & 0b111_00_11111_11111) | ((new as u16 & 0b11) << 10);
+        self.0 = (self.0 & 0b111_0011_1111_1111) | ((new as u16 & 0b11) << 10);
     }
     pub fn get_fine_y_scroll(&self) -> u8 {
         (self.0 >> 12) as u8 & 0b111
     }
     pub fn set_fine_y_scroll(&mut self, new: u8) {
-        self.0 = (self.0 & 0b000_11_11111_11111) | ((new as u16 & 0b111) << 12);
+        self.0 = (self.0 & 0b000_1111_1111_1111) | ((new as u16 & 0b111) << 12);
     }
     pub fn get_ppu_address(&self) -> u16 {
         self.0
@@ -414,28 +414,28 @@ impl Ppu {
                     }
                 }
             }
-            if (9..=257).contains(&self.dot) || (329..=337).contains(&self.dot) {
-                if (self.dot - 1) % 8 == 0 {
-                    self.pattern_low_shift_register |= self.bg_tile_byte_low as u16;
-                    self.pattern_high_shift_register |= self.bg_tile_byte_high as u16;
-                    self.attribute_low_shift_register |= if self.attribute & 0b01 > 0 {
-                        0xFF
-                    } else {
-                        0x00
-                    };
-                    self.attribute_high_shift_register |= if self.attribute & 0b10 > 0 {
-                        0xFF
-                    } else {
-                        0x00
-                    };
-                }
+            if ((9..=257).contains(&self.dot) || (329..=337).contains(&self.dot))
+                && (self.dot - 1) % 8 == 0
+            {
+                self.pattern_low_shift_register |= self.bg_tile_byte_low as u16;
+                self.pattern_high_shift_register |= self.bg_tile_byte_high as u16;
+                self.attribute_low_shift_register |= if self.attribute & 0b01 > 0 {
+                    0xFF
+                } else {
+                    0x00
+                };
+                self.attribute_high_shift_register |= if self.attribute & 0b10 > 0 {
+                    0xFF
+                } else {
+                    0x00
+                };
             }
             if self.scanline <= 239 && (1..=256).contains(&self.dot) {
                 let mut background = None;
                 if self.mask_register.get_show_background()
                     && !(!self.mask_register.get_show_background_in_leftmost_col() && self.dot <= 8)
                 {
-                    let mask: u16 = 0b10000000_00000000 >> self.x;
+                    let mask: u16 = 0b1000_0000_0000_0000 >> self.x;
                     let pattern_low = ((self.pattern_low_shift_register & mask) > 0) as u8;
                     let pattern_high = ((self.pattern_high_shift_register & mask) > 0) as u8;
                     let color = (pattern_high << 1) | pattern_low;
@@ -508,7 +508,7 @@ impl Ppu {
                         get_rgb(get_bg_color(ppu_bus, bg_color, bg_palette))
                     }
                     (None, None) => {
-                        let ppu_addr = self.v.get_ppu_address() & 0b00111111_11111111;
+                        let ppu_addr = self.v.get_ppu_address() & 0b0011_1111_1111_1111;
                         if ppu_addr >= 0x3F00 {
                             get_rgb(ppu_bus.read(ppu_addr) & 0b00111111)
                         } else {
@@ -580,14 +580,11 @@ impl Ppu {
                     _ => {}
                 }
             }
-            if self.dot == 257 {
-                if self.is_rendering_enabled() {
-                    self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
-                    self.v.set_nametable_select(
-                        (self.v.get_nametable_select() & 0b10)
-                            | (self.t.get_nametable_select() & 0b01),
-                    );
-                }
+            if self.dot == 257 && self.is_rendering_enabled() {
+                self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
+                self.v.set_nametable_select(
+                    (self.v.get_nametable_select() & 0b10) | (self.t.get_nametable_select() & 0b01),
+                );
             }
             if (337..=339).contains(&self.dot) {
                 self.nametable_byte = ppu_bus.read(0x2000 + (self.v.0 & 0x0FFF));
@@ -603,14 +600,13 @@ impl Ppu {
         }
 
         if self.dot == 257 {}
-        if self.scanline == 261 && self.dot >= 280 && self.dot <= 304 {
-            if self.is_rendering_enabled() {
-                self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
-                self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
-                self.v.set_nametable_select(
-                    (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
-                );
-            }
+        if self.scanline == 261 && self.dot >= 280 && self.dot <= 304 && self.is_rendering_enabled()
+        {
+            self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
+            self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
+            self.v.set_nametable_select(
+                (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
+            );
         }
 
         if self.dot == 340 {
@@ -679,12 +675,9 @@ impl Ppu {
     pub fn write(&mut self, address: u16, value: u8, ppu_bus: &mut PpuBus) {
         match 0x2000 + (address & 0x0007) {
             0x2000 => {
-                let old_control_register = self.control_register;
                 self.control_register = ControlRegister(value);
                 self.t.set_nametable_select(value & 0b11);
-                // if !old_control_register.get_nmi_enable() && self.control_register.get_nmi_enable() && self.vblank && self.status_register.get_vblank_flag() {
-                //     trigger NMI early
-                // }
+                // TODO implement early NMI trigger bug
             }
             0x2001 => self.mask_register = MaskRegister(value),
             0x2003 => {
@@ -767,7 +760,6 @@ impl Ppu {
     fn set_oam_pattern(&mut self, ppu_bus: &mut PpuBus, sprite_number: usize, pattern_high: bool) {
         let y = self.sprite_secondary_oam[sprite_number * 4 + 0] as u16;
         let index = self.sprite_secondary_oam[sprite_number * 4 + 1];
-        let x = self.sprite_secondary_oam[sprite_number * 4 + 3];
         let attributes = self.sprite_secondary_oam[sprite_number * 4 + 2];
         let flip_horizontally = attributes & 0b01000000 > 0;
         let flip_vertically = attributes & 0b10000000 > 0;
@@ -783,10 +775,6 @@ impl Ppu {
         if self.scanline < y || self.scanline >= y + sprite_height {
             target[sprite_number] = 0;
             return;
-        }
-
-        if y < 240 {
-            let a =  0;
         }
 
         let scanline_offset = self.scanline - y;

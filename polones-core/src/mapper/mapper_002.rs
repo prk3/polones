@@ -11,7 +11,7 @@ pub struct Mapper002 {
 
 impl Mapper for Mapper002 {
     fn from_game(game: GameFile) -> Result<Self, &'static str> {
-        if game.prg_rom().len() == 0 {
+        if game.prg_rom().is_empty() {
             return Err("Mapper 002: Unexpected prg rom size");
         }
 
@@ -33,10 +33,9 @@ impl Mapper for Mapper002 {
     fn cpu_read(&mut self, address: u16) -> u8 {
         // TODO implement bus conflicts based on submapper and format
         match address {
-            0x8000..=0xBFFF => {
-                self.game.prg_rom()
-                    [((self.prg_rom_bank as usize) << 14) & (self.game.prg_rom().len() - 1) | (address as usize & 0x3FFF)]
-            }
+            0x8000..=0xBFFF => self.game.prg_rom()[((self.prg_rom_bank as usize) << 14)
+                & (self.game.prg_rom().len() - 1)
+                | (address as usize & 0x3FFF)],
             0xC000..=0xFFFF => self.game.prg_rom()
                 [(self.game.prg_rom().len() - 0x4000) | (address as usize & 0x3FFF)],
             _ => panic!("Mapper 002: CPU read from {:04X} out of bounds.", address),

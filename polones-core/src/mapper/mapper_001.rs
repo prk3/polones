@@ -65,7 +65,7 @@ impl Mapper for Mapper001 {
                 if byte & 0b10000000 > 0 {
                     self.load_register = 0;
                     self.load_register_bits = 0;
-                    self.control = self.control | 0x0C;
+                    self.control |= 0x0C;
                 } else {
                     self.load_register = (self.load_register << 1) | byte & 1;
                     self.load_register_bits += 1;

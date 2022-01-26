@@ -115,30 +115,30 @@ impl GameFile {
             let chr_nvram_size_shift = data[11] >> 4;
             let chr_ram_size_shift = data[11] & 0b00001111;
 
-            let cpu_ppu_timing_mode = data[12] & 0b00000011;
+            let _cpu_ppu_timing_mode = data[12] & 0b00000011;
 
             if chr_nvram_size_shift > 0 && !battery_present {
                 return Err(());
             }
 
-            let hardware_type = if console_type == 1 {
+            let _hardware_type = if console_type == 1 {
                 Some(data[13] >> 4)
             } else {
                 None
             };
-            let ppu_type = if console_type == 1 {
+            let _ppu_type = if console_type == 1 {
                 Some(data[13] & 0b00001111)
             } else {
                 None
             };
-            let extended_console_type = if console_type == 3 {
+            let _extended_console_type = if console_type == 3 {
                 Some(data[13] & 0b00001111)
             } else {
                 None
             };
 
-            let miscellaneous_roms_number = data[14] & 0b00000011;
-            let default_expansion_device = data[15] & 0b00111111;
+            let _miscellaneous_roms_number = data[14] & 0b00000011;
+            let _default_expansion_device = data[15] & 0b00111111;
 
             mapper = (mapper_number_nybble_3 as u16) << 8
                 | (mapper_number_nybble_2 as u16) << 4

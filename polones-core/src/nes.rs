@@ -187,9 +187,7 @@ impl<'a> CpuBus<'a> {
                 ppu.read(address, &mut ppu_bus)
             }
             0x4016..=0x4017 => self.io.read(address),
-            address if self.mapper.cpu_address_mapped(address) => {
-                self.mapper.cpu_read(address)
-            }
+            address if self.mapper.cpu_address_mapped(address) => self.mapper.cpu_read(address),
             _ => {
                 eprintln!(
                     "Nes: CPU bus read from unmapped address {:04x}, returning 0.",

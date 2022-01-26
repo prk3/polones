@@ -10,12 +10,12 @@ pub struct Cpu {
     pub status_register: StatusRegister,
 
     // other
-    opcode: u8, // the opcode that is currently being handled
-    sleep_cycles: u8, // how many cycles the current instruction should take
+    opcode: u8,                  // the opcode that is currently being handled
+    sleep_cycles: u8,            // how many cycles the current instruction should take
     operand_address: u16, // address of operand (not used when address mode is accumulator of implied)
     operand_accumulator: bool, // whether the operand is accumulator
     crossed_page_boundary: bool, // whether sleep cycles might be increased by crossing the page boundary
-    program_counter_offset: i8, // relative jump target (for branch instructions)
+    program_counter_offset: i8,  // relative jump target (for branch instructions)
 
     nmi_requested: bool,
     irq_requested: bool,
@@ -126,7 +126,7 @@ impl Cpu {
 
         if self.sleep_cycles > 0 {
             self.sleep_cycles -= 1;
-            return
+            return;
         }
 
         if self.nmi_sleep_cycles > 0 {
@@ -170,7 +170,10 @@ impl Cpu {
         cpu_bus.write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
 
         let saved_status_register = self.status_register;
-        cpu_bus.write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
+        cpu_bus.write(
+            0x0100 + self.stack_pointer.wrapping_sub(2) as u16,
+            saved_status_register.0,
+        );
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -187,7 +190,10 @@ impl Cpu {
         cpu_bus.write(0x0100 + self.stack_pointer.wrapping_sub(1) as u16, low);
 
         let saved_status_register = self.status_register;
-        cpu_bus.write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
+        cpu_bus.write(
+            0x0100 + self.stack_pointer.wrapping_sub(2) as u16,
+            saved_status_register.0,
+        );
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -204,7 +210,8 @@ impl Cpu {
         }
 
         if self.dma_cycles_left & 1 == 0 {
-            self.dma_byte = cpu_bus.read(((self.dma_page as u16 + 1) << 8) - (self.dma_cycles_left >> 1));
+            self.dma_byte =
+                cpu_bus.read(((self.dma_page as u16 + 1) << 8) - (self.dma_cycles_left >> 1));
         } else {
             cpu_bus.write(0x2004, self.dma_byte);
         }
@@ -212,7 +219,10 @@ impl Cpu {
     }
 
     pub fn finished_instruction(&self) -> bool {
-        self.dma_cycles_left == 0 && self.sleep_cycles == 0 && self.nmi_sleep_cycles == 0 && self.irq_sleep_cycles == 0
+        self.dma_cycles_left == 0
+            && self.sleep_cycles == 0
+            && self.nmi_sleep_cycles == 0
+            && self.irq_sleep_cycles == 0
     }
 
     fn get_operand_byte(&self, cpu_bus: &mut CpuBus) -> u8 {
@@ -234,10 +244,11 @@ impl Cpu {
     // Helper function for all kind of branch instruction.
     // Branches to pc + program_counter_offset.
     // Adds 1 or 2 sleep cycles, depending on the jump address.
-    fn branch(&mut self, cpu_bus: &mut CpuBus) {
+    fn branch(&mut self, _cpu_bus: &mut CpuBus) {
         let old_program_counter = self.program_counter;
 
-        self.program_counter = u16_address_offset(self.program_counter, self.program_counter_offset);
+        self.program_counter =
+            u16_address_offset(self.program_counter, self.program_counter_offset);
 
         if self.program_counter & 0xFF00 == old_program_counter & 0xFF00 {
             self.sleep_cycles += 1;
@@ -262,7 +273,8 @@ impl Cpu {
         let high = cpu_bus.read(self.program_counter.wrapping_add(2));
 
         self.operand_accumulator = false;
-        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
+        self.operand_address =
+            (((high as u16) << 8) | (low as u16)).wrapping_add(self.x_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;
@@ -276,7 +288,8 @@ impl Cpu {
         let high = cpu_bus.read(self.program_counter.wrapping_add(2));
 
         self.operand_accumulator = false;
-        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
+        self.operand_address =
+            (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;
@@ -285,14 +298,14 @@ impl Cpu {
         self.program_counter = self.program_counter.wrapping_add(3);
     }
 
-    fn address_mode_immediate(&mut self, cpu_bus: &mut CpuBus) {
+    fn address_mode_immediate(&mut self, _cpu_bus: &mut CpuBus) {
         self.operand_accumulator = false;
         self.operand_address = self.program_counter.wrapping_add(1);
 
         self.program_counter = self.program_counter.wrapping_add(2);
     }
 
-    fn address_mode_implied(&mut self, cpu_bus: &mut CpuBus) {
+    fn address_mode_implied(&mut self, _cpu_bus: &mut CpuBus) {
         self.operand_accumulator = true;
         self.program_counter = self.program_counter.wrapping_add(1);
     }
@@ -325,7 +338,9 @@ impl Cpu {
     }
 
     fn address_mode_x_indexed_indirect(&mut self, cpu_bus: &mut CpuBus) {
-        let ptr_low = cpu_bus.read(self.program_counter.wrapping_add(1)).wrapping_add(self.x_index);
+        let ptr_low = cpu_bus
+            .read(self.program_counter.wrapping_add(1))
+            .wrapping_add(self.x_index);
 
         let ptr = ptr_low as u16;
 
@@ -346,7 +361,8 @@ impl Cpu {
         let high = cpu_bus.read((ptr + 1) & 0x00FF);
 
         self.operand_accumulator = false;
-        self.operand_address = (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
+        self.operand_address =
+            (((high as u16) << 8) | (low as u16)).wrapping_add(self.y_index as u16);
 
         if (self.operand_address >> 8) as u8 != high {
             self.crossed_page_boundary = true;
@@ -395,13 +411,17 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(cpu_bus);
         let old_accumulator = self.accumulator;
 
-        let result = self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
+        let result =
+            self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
         self.accumulator = result as u8;
 
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
         self.status_register.set_carry(result > 0xFF);
-        self.status_register.set_overflow((old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0);
+        self.status_register.set_overflow(
+            (old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0,
+        );
     }
 
     // AND
@@ -411,7 +431,8 @@ impl Cpu {
 
         self.accumulator = old_accumulator & operand_byte;
 
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
@@ -422,7 +443,8 @@ impl Cpu {
         operand_byte <<= 1;
 
         self.status_register.set_zero(operand_byte == 0);
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_carry(leftmost_bit > 0);
         self.set_operand_byte(cpu_bus, operand_byte);
     }
@@ -453,8 +475,10 @@ impl Cpu {
         let operand_byte = self.get_operand_byte(cpu_bus);
         let accumulator_and_operand = self.accumulator & operand_byte;
 
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
-        self.status_register.set_overflow(operand_byte & 0b01000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_overflow(operand_byte & 0b01000000 > 0);
         self.status_register.set_zero(accumulator_and_operand == 0);
     }
 
@@ -490,7 +514,10 @@ impl Cpu {
 
         let mut saved_status_register = self.status_register;
         saved_status_register.set_break(true);
-        cpu_bus.write(0x0100 + self.stack_pointer.wrapping_sub(2) as u16, saved_status_register.0);
+        cpu_bus.write(
+            0x0100 + self.stack_pointer.wrapping_sub(2) as u16,
+            saved_status_register.0,
+        );
 
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         self.status_register.set_interrupt(true);
@@ -515,22 +542,22 @@ impl Cpu {
     }
 
     // CLC
-    fn clear_carry(&mut self, cpu_bus: &mut CpuBus) {
+    fn clear_carry(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_carry(false);
     }
 
     // CLD
-    fn clear_decimal(&mut self, cpu_bus: &mut CpuBus) {
+    fn clear_decimal(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_decimal(false);
     }
 
     // CLI
-    fn clear_interrupt_disable(&mut self, cpu_bus: &mut CpuBus) {
+    fn clear_interrupt_disable(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_interrupt(false);
     }
 
     // CLV
-    fn clear_overflow(&mut self, cpu_bus: &mut CpuBus) {
+    fn clear_overflow(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_overflow(false);
     }
 
@@ -538,16 +565,20 @@ impl Cpu {
     fn compare(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus);
         let accumulator_minus_operand = self.accumulator.wrapping_sub(operand_byte);
-        self.status_register.set_negative(accumulator_minus_operand & 0b10000000 > 0);
-        self.status_register.set_zero(self.accumulator == operand_byte);
-        self.status_register.set_carry(self.accumulator >= operand_byte);
+        self.status_register
+            .set_negative(accumulator_minus_operand & 0b10000000 > 0);
+        self.status_register
+            .set_zero(self.accumulator == operand_byte);
+        self.status_register
+            .set_carry(self.accumulator >= operand_byte);
     }
 
     // CPX
     fn compare_with_x(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus);
         let x_minus_operand = self.x_index.wrapping_sub(operand_byte);
-        self.status_register.set_negative(x_minus_operand & 0b10000000 > 0);
+        self.status_register
+            .set_negative(x_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == operand_byte);
         self.status_register.set_carry(self.x_index >= operand_byte);
     }
@@ -556,7 +587,8 @@ impl Cpu {
     fn compare_with_y(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus);
         let y_minus_operand = self.y_index.wrapping_sub(operand_byte);
-        self.status_register.set_negative(y_minus_operand & 0b10000000 > 0);
+        self.status_register
+            .set_negative(y_minus_operand & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == operand_byte);
         self.status_register.set_carry(self.y_index >= operand_byte);
     }
@@ -564,57 +596,64 @@ impl Cpu {
     // DEC
     fn decrement(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus).wrapping_sub(1);
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
         self.set_operand_byte(cpu_bus, operand_byte);
     }
 
     // DEX
-    fn decrement_x(&mut self, cpu_bus: &mut CpuBus) {
+    fn decrement_x(&mut self, _cpu_bus: &mut CpuBus) {
         self.x_index = self.x_index.wrapping_sub(1);
-        self.status_register.set_negative(self.x_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // DEY
-    fn decrement_y(&mut self, cpu_bus: &mut CpuBus) {
+    fn decrement_y(&mut self, _cpu_bus: &mut CpuBus) {
         self.y_index = self.y_index.wrapping_sub(1);
-        self.status_register.set_negative(self.y_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
     // EOR
     fn exclusive_or(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus);
-        self.accumulator = self.accumulator ^ operand_byte;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.accumulator ^= operand_byte;
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // INC
     fn increment(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus).wrapping_add(1);
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
         self.set_operand_byte(cpu_bus, operand_byte);
     }
 
     // INX
-    fn increment_x(&mut self, cpu_bus: &mut CpuBus) {
+    fn increment_x(&mut self, _cpu_bus: &mut CpuBus) {
         self.x_index = self.x_index.wrapping_add(1);
-        self.status_register.set_negative(self.x_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // INY
-    fn increment_y(&mut self, cpu_bus: &mut CpuBus) {
+    fn increment_y(&mut self, _cpu_bus: &mut CpuBus) {
         self.y_index = self.y_index.wrapping_add(1);
-        self.status_register.set_negative(self.y_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
     // JMP
-    fn jump(&mut self, cpu_bus: &mut CpuBus) {
+    fn jump(&mut self, _cpu_bus: &mut CpuBus) {
         self.program_counter = self.operand_address;
     }
 
@@ -634,21 +673,24 @@ impl Cpu {
     // LDA
     fn load_accumulator(&mut self, cpu_bus: &mut CpuBus) {
         self.accumulator = self.get_operand_byte(cpu_bus);
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // LDX
     fn load_x(&mut self, cpu_bus: &mut CpuBus) {
         self.x_index = self.get_operand_byte(cpu_bus);
-        self.status_register.set_negative(self.x_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.x_index & 0b10000000 > 0);
         self.status_register.set_zero(self.x_index == 0);
     }
 
     // LDY
     fn load_y(&mut self, cpu_bus: &mut CpuBus) {
         self.y_index = self.get_operand_byte(cpu_bus);
-        self.status_register.set_negative(self.y_index & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.y_index & 0b10000000 > 0);
         self.status_register.set_zero(self.y_index == 0);
     }
 
@@ -656,7 +698,7 @@ impl Cpu {
     fn logical_shift_right(&mut self, cpu_bus: &mut CpuBus) {
         let mut operand_byte = self.get_operand_byte(cpu_bus);
         let rightmost_bit = operand_byte & 1;
-        operand_byte = operand_byte >> 1;
+        operand_byte >>= 1;
         self.status_register.set_negative(false);
         self.status_register.set_zero(operand_byte == 0);
         self.status_register.set_carry(rightmost_bit > 0);
@@ -664,13 +706,14 @@ impl Cpu {
     }
 
     // NOP
-    fn no_operation(&mut self, cpu_bus: &mut CpuBus) {}
+    fn no_operation(&mut self, _cpu_bus: &mut CpuBus) {}
 
     // ORA
     fn or_with_accumulator(&mut self, cpu_bus: &mut CpuBus) {
         let operand_byte = self.get_operand_byte(cpu_bus);
-        self.accumulator = self.accumulator | operand_byte;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.accumulator |= operand_byte;
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
@@ -693,7 +736,8 @@ impl Cpu {
     fn pull_accumulator(&mut self, cpu_bus: &mut CpuBus) {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.accumulator = cpu_bus.read(0x0100 + self.stack_pointer as u16);
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
@@ -712,7 +756,8 @@ impl Cpu {
         let leftmost_bit = operand_byte & 0b10000000;
         operand_byte = (operand_byte << 1) | self.status_register.get_carry() as u8;
         self.status_register.set_carry(leftmost_bit > 0);
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
         self.set_operand_byte(cpu_bus, operand_byte);
     }
@@ -723,14 +768,16 @@ impl Cpu {
         let rightmost_bit = operand_byte & 1;
         operand_byte = (operand_byte >> 1) | ((self.status_register.get_carry() as u8) << 7);
         self.status_register.set_carry(rightmost_bit > 0);
-        self.status_register.set_negative(operand_byte & 0b10000000 > 0);
+        self.status_register
+            .set_negative(operand_byte & 0b10000000 > 0);
         self.status_register.set_zero(operand_byte == 0);
         self.set_operand_byte(cpu_bus, operand_byte);
     }
 
     // RTI
     fn return_from_interrupt(&mut self, cpu_bus: &mut CpuBus) {
-        self.status_register = StatusRegister(cpu_bus.read(0x0100 + self.stack_pointer.wrapping_add(1) as u16));
+        self.status_register =
+            StatusRegister(cpu_bus.read(0x0100 + self.stack_pointer.wrapping_add(1) as u16));
         self.status_register.set_break(false);
         self.status_register.set_ignored(false);
         let low = cpu_bus.read(0x0100 + self.stack_pointer.wrapping_add(2) as u16);
@@ -754,27 +801,31 @@ impl Cpu {
         let operand_byte = !self.get_operand_byte(cpu_bus);
         let old_accumulator = self.accumulator;
 
-        let result = self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
+        let result =
+            self.accumulator as u16 + operand_byte as u16 + self.status_register.get_carry() as u16;
         self.accumulator = result as u8;
 
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
         self.status_register.set_carry(result > 0xFF);
-        self.status_register.set_overflow((old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0);
+        self.status_register.set_overflow(
+            (old_accumulator as u16 ^ result) & (operand_byte as u16 ^ result) & 0x0080 > 0,
+        );
     }
 
     // SEC
-    fn set_carry(&mut self, cpu_bus: &mut CpuBus) {
+    fn set_carry(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_carry(true);
     }
 
     // SED
-    fn set_decimal(&mut self, cpu_bus: &mut CpuBus) {
+    fn set_decimal(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_decimal(true);
     }
 
     // SEI
-    fn set_interrupt_disable(&mut self, cpu_bus: &mut CpuBus) {
+    fn set_interrupt_disable(&mut self, _cpu_bus: &mut CpuBus) {
         self.status_register.set_interrupt(true);
     }
 
@@ -794,42 +845,47 @@ impl Cpu {
     }
 
     // TAX
-    fn transfer_accumulator_to_x(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_accumulator_to_x(&mut self, _cpu_bus: &mut CpuBus) {
         self.x_index = self.accumulator;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TAY
-    fn transfer_accumulator_to_y(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_accumulator_to_y(&mut self, _cpu_bus: &mut CpuBus) {
         self.y_index = self.accumulator;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TSX
-    fn transfer_stack_pointer_to_x(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_stack_pointer_to_x(&mut self, _cpu_bus: &mut CpuBus) {
         self.x_index = self.stack_pointer;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TXA
-    fn transfer_x_to_accumulator(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_x_to_accumulator(&mut self, _cpu_bus: &mut CpuBus) {
         self.accumulator = self.x_index;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
     // TXS
-    fn transfer_x_to_stack_pointer(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_x_to_stack_pointer(&mut self, _cpu_bus: &mut CpuBus) {
         self.stack_pointer = self.x_index;
     }
 
     // TYA
-    fn transfer_y_to_accumulator(&mut self, cpu_bus: &mut CpuBus) {
+    fn transfer_y_to_accumulator(&mut self, _cpu_bus: &mut CpuBus) {
         self.accumulator = self.y_index;
-        self.status_register.set_negative(self.accumulator & 0b10000000 > 0);
+        self.status_register
+            .set_negative(self.accumulator & 0b10000000 > 0);
         self.status_register.set_zero(self.accumulator == 0);
     }
 
@@ -1892,7 +1948,11 @@ impl Cpu {
     // FF - illegal
 
     fn run_xx(&mut self, cpu_bus: &mut CpuBus) {
-        eprintln!("CPU: Illegal opcode ({:#02}) at ({:04X}). Running noop.", self.opcode, self.program_counter.wrapping_sub(1));
+        eprintln!(
+            "CPU: Illegal opcode ({:#02}) at ({:04X}). Running noop.",
+            self.opcode,
+            self.program_counter.wrapping_sub(1)
+        );
         self.address_mode_implied(cpu_bus);
         self.no_operation(cpu_bus);
         self.sleep_cycles += 2;
@@ -1952,12 +2012,12 @@ impl StatusRegister {
     fn new() -> Self {
         Self(0)
     }
-    flag_methods!(get_negative,  set_negative,  7);
-    flag_methods!(get_overflow,  set_overflow,  6);
-    flag_methods!(get_ignored,   set_ignored,   5);
-    flag_methods!(get_break,     set_break,     4);
-    flag_methods!(get_decimal,   set_decimal,   3);
+    flag_methods!(get_negative, set_negative, 7);
+    flag_methods!(get_overflow, set_overflow, 6);
+    flag_methods!(get_ignored, set_ignored, 5);
+    flag_methods!(get_break, set_break, 4);
+    flag_methods!(get_decimal, set_decimal, 3);
     flag_methods!(get_interrupt, set_interrupt, 2);
-    flag_methods!(get_zero,      set_zero,      1);
-    flag_methods!(get_carry,     set_carry,     0);
+    flag_methods!(get_zero, set_zero, 1);
+    flag_methods!(get_carry, set_carry, 0);
 }

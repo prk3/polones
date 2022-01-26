@@ -27,13 +27,13 @@ pub fn polones_start(rom: Vec<u8>) -> Option<String> {
 
     let game = match GameFile::read("rom".into(), rom) {
         Ok(game) => game,
-        Err(err) => return Some("could not read game".into()),
+        Err(_err) => return Some("could not read game".into()),
     };
     let display = CanvasDisplay {};
     let input = WebInput {};
     let nes = match Nes::new(game, display, input) {
         Ok(nes) => nes,
-        Err(err) => return Some("Could not start NES".into()),
+        Err(_err) => return Some("Could not start NES".into()),
     };
     unsafe {
         NES = Some(nes);
@@ -91,12 +91,26 @@ enum PortStateExternal {
 fn port_state_external_string_to_port_state(string: String) -> PortState {
     let port_state_external = serde_json::from_str(&string).unwrap();
     match port_state_external {
-        PortStateExternal::Unplugged { .. } => {
-            PortState::Unplugged
-        }
-        PortStateExternal::Gamepad { a, b, select, start, up, down, left, right } => {
-            PortState::Gamepad { a, b, select, start, up, down, left, right }
-        }
+        PortStateExternal::Unplugged { .. } => PortState::Unplugged,
+        PortStateExternal::Gamepad {
+            a,
+            b,
+            select,
+            start,
+            up,
+            down,
+            left,
+            right,
+        } => PortState::Gamepad {
+            a,
+            b,
+            select,
+            start,
+            up,
+            down,
+            left,
+            right,
+        },
     }
 }
 

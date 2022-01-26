@@ -94,9 +94,7 @@ impl SdlMemoryDebugger {
             for x in 0..16u8 {
                 self.text_area.write_u8_with_color(
                     match self.page {
-                        0x00..=0xFF => {
-                            cpu_bus.read((256 * self.page) + (y as u16 * 16) + x as u16)
-                        }
+                        0x00..=0xFF => cpu_bus.read((256 * self.page) + (y as u16 * 16) + x as u16),
                         0x100..=0x13F => {
                             let (_, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
                             ppu_bus.read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)

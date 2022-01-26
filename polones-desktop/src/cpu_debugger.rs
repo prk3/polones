@@ -200,8 +200,8 @@ impl SdlCpuDebugger {
         canvas.present();
 
         let breakpoints = std::fs::read_to_string("./breakpoints")
-            .map(|s| deserialize_breakpoints(s))
-            .unwrap_or(Vec::new());
+            .map(deserialize_breakpoints)
+            .unwrap_or_default();
 
         Self {
             canvas,
@@ -415,7 +415,7 @@ impl SdlCpuDebugger {
                     }
                     // TODO add game name to the breakpoints file name
                     let _ = std::fs::write(
-                        format!("./breakpoints"),
+                        "./breakpoints".to_string(),
                         serialize_breakpoints(&self.breakpoints),
                     );
                     self.breakpoint_mode = false;
@@ -657,7 +657,7 @@ fn serialize_breakpoints(breakpoints: &[u16]) -> String {
 
     let mut output = String::new();
     for b in breakpoints.iter() {
-        write!(&mut output, "{:04X}\n", *b).unwrap();
+        writeln!(&mut output, "{:04X}", *b).unwrap();
     }
     output
 }

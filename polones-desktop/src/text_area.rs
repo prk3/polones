@@ -64,11 +64,11 @@ impl<const W: usize, const H: usize> TextArea<W, H> {
         }
 
         let (char_row, char_col) = match value {
-            _c @ 'A'..='O' => (0, 1 + (value as u8 - 'A' as u8)),
-            _c @ 'a'..='o' => (0, 1 + (value as u8 - 'a' as u8)),
-            _c @ 'P'..='Z' => (1, value as u8 - 'P' as u8),
-            _c @ 'p'..='z' => (1, value as u8 - 'p' as u8),
-            _c @ '0'..='9' => (3, value as u8 - '0' as u8),
+            _c @ 'A'..='O' => (0, 1 + (value as u8 - b'A')),
+            _c @ 'a'..='o' => (0, 1 + (value as u8 - b'a')),
+            _c @ 'P'..='Z' => (1, value as u8 - b'P'),
+            _c @ 'p'..='z' => (1, value as u8 - b'p'),
+            _c @ '0'..='9' => (3, value as u8 - b'0'),
             '@' => (0, 0),
             '[' => (1, 11),
             '£' => (1, 12),

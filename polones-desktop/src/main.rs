@@ -270,9 +270,7 @@ impl Display for SdlDisplay {
             canvas, texture, ..
         } = &mut *inner;
         canvas.clear();
-        canvas
-            .copy(&texture, frame_rect, scaled_frame_rect)
-            .unwrap();
+        canvas.copy(texture, frame_rect, scaled_frame_rect).unwrap();
     }
 }
 
@@ -502,10 +500,7 @@ fn main() {
                 if let Some((_id, debugger)) = &mut cpu_debugger {
                     debugger.update(&mut nes);
 
-                    if debugger
-                        .breakpoints
-                        .contains(&nes.cpu.program_counter)
-                    {
+                    if debugger.breakpoints.contains(&nes.cpu.program_counter) {
                         while !nes.cpu.finished_instruction() {
                             nes.run_one_cpu_tick();
                             debugger.update(&mut nes);

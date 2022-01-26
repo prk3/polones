@@ -40,13 +40,11 @@ impl SdlGraphicsDebugger {
     }
 
     pub fn show(&mut self, nes: &mut Nes) {
-        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+        let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
 
         if self.mode == 1 || self.mode == 2 {
-            let nt = ppu
-                .control_register
-                .get_background_tile_select() as u16;
+            let nt = ppu.control_register.get_background_tile_select() as u16;
 
             self.texture
                 .with_lock(None, |data, _| {
@@ -154,8 +152,8 @@ impl SdlGraphicsDebugger {
 
                                         let (r, g, b) = if self.mode == 3 {
                                             if ((high >> 7 << 1) | low >> 7) == 0 {
-                                                PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111)
-                                                    as usize]
+                                                PALLETTE
+                                                    [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                             } else {
                                                 let b = ppu_bus.read(
                                                     0x3F00
@@ -241,8 +239,7 @@ impl SdlGraphicsDebugger {
 
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                                            PALLETTE
-                                                [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
+                                            PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
                                             let b = ppu_bus.read(
                                                 0x3F10
@@ -314,8 +311,7 @@ impl SdlGraphicsDebugger {
 
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                                            PALLETTE
-                                                [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
+                                            PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
                                             let b = ppu_bus.read(
                                                 0x3F10
@@ -378,8 +374,7 @@ impl SdlGraphicsDebugger {
 
                         for yf in 0..8usize {
                             for xc in 0..4usize {
-                                let byte =
-                                    ppu_bus.read(0x3F00 | ((yc as u16) << 2) | xc as u16);
+                                let byte = ppu_bus.read(0x3F00 | ((yc as u16) << 2) | xc as u16);
                                 let (r, g, b) = PALLETTE[byte as usize & 0b00111111];
                                 for xf in 0..8 {
                                     let i = (512 * 8)

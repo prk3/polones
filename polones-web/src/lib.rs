@@ -42,9 +42,11 @@ pub fn polones_start(rom: Vec<u8>) -> Option<String> {
 }
 
 #[wasm_bindgen]
-pub fn polones_tick() -> Option<String> {
+pub fn polones_tick(times: u32) -> Option<String> {
     if let Some(nes) = unsafe { &mut NES } {
-        nes.run_one_cpu_tick();
+        for _ in 0..times {
+            nes.run_one_cpu_tick();
+        }
         None
     } else {
         Some("NES not initialized".into())

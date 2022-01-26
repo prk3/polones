@@ -141,9 +141,7 @@ export default function Emulator() {
     const ref = { current: 0 };
     ref.current = window.setInterval(function runTicksForOneFrame() {
       try {
-        for (let i = 0; i < 29829; i++) {
-          polones.polones_tick();
-        }
+          polones.polones_tick(29829);
       } catch (e) {
         window.clearInterval(ref.current);
         console.error(e);

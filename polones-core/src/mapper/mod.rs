@@ -3,6 +3,7 @@ use crate::game_file::GameFile;
 mod mapper_000;
 mod mapper_001;
 mod mapper_002;
+mod mapper_003;
 
 pub trait Mapper {
     fn from_game(game: GameFile) -> Result<Self, &'static str>
@@ -28,6 +29,9 @@ pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper>, &'static
         }
         (2, _) => {
             mapper_002::Mapper002::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
+        }
+        (3, _) => {
+            mapper_003::Mapper003::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
         }
         _ => Err("unsupported mapper"),
     }

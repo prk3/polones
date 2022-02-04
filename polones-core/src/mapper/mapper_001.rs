@@ -11,7 +11,7 @@ pub struct Mapper001 {
     chr_bank_0: u8,
     chr_bank_1: u8,
     prg_bank: u8,
-    ram: Ram<{ 32 * 1024 }>,
+    ram: Ram<{ 32 * 1024 }>, // TODO make ram optional
 }
 
 impl Mapper for Mapper001 {
@@ -67,7 +67,7 @@ impl Mapper for Mapper001 {
                     self.load_register_bits = 0;
                     self.control |= 0x0C;
                 } else {
-                    self.load_register = (self.load_register << 1) | byte & 1;
+                    self.load_register = (self.load_register >> 1) | ((byte & 1) << 4);
                     self.load_register_bits += 1;
 
                     if self.load_register_bits == 5 {
@@ -79,6 +79,7 @@ impl Mapper for Mapper001 {
                             _ => unreachable!(),
                         }
                         self.load_register = 0;
+                        self.load_register_bits = 0;
                     }
                 }
             }
@@ -105,9 +106,9 @@ impl Mapper for Mapper001 {
     fn ppu_write(&mut self, address: u16, _byte: u8) {
         match address {
             0x0000..=0x1FFF => {
-                eprintln!("Mapper 000: PPU write to {:04X} ignored.", address);
+                eprintln!("Mapper 001: PPU write to {:04X} ignored.", address);
             }
-            _ => panic!("Mapper 000: PPU write to {:04x} out of bounds.", address),
+            _ => panic!("Mapper 001: PPU write to {:04x} out of bounds.", address),
         }
     }
 

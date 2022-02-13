@@ -104,10 +104,10 @@ function PortInput({
 
     let value = e.target.value as unknown as InputMapping["type"];
     if (value === 'unplugged') {
-      onInputMappingChange?.({ type:'unplugged' });
+      onInputMappingChange?.({ type: 'unplugged' });
     }
     if (value === 'gamepad') {
-      onInputMappingChange?.({ type:'gamepad', ...DEFAULT_GAMEPAD_MAPPING });
+      onInputMappingChange?.({ type: 'gamepad', ...DEFAULT_GAMEPAD_MAPPING });
     }
   }
 
@@ -127,12 +127,24 @@ function PortInput({
     setRemapping?.(true);
   }
 
+  function handleGamepadRemapCancelClick(e: MouseEvent<HTMLButtonElement>) {
+    setGamepadScan(null);
+    setRemapping?.(false);
+  }
+
   React.useEffect(() => {
     if (gamepadScan) {
       let id = { current: 0 };
+
       function handleAnimationFrame() {
-        function setPath(path: string) {
+        id.current = window.requestAnimationFrame(handleAnimationFrame);
+
+        let path = input.firstPressedExcept(gamepadScan!.usedPaths);
+
+        if (path !== null) {
           if (gamepadScan!.current === 'a') {
+            setGamepadScan(null);
+            setRemapping?.(false);
             onInputMappingChange?.({
               type: 'gamepad',
               a: path,
@@ -144,8 +156,6 @@ function PortInput({
               left: gamepadScan!.left!,
               right: gamepadScan!.right!,
             });
-            setGamepadScan(null);
-            setRemapping?.(false);
           } else {
             setGamepadScan({
               ...gamepadScan!,
@@ -169,11 +179,6 @@ function PortInput({
             });
           }
         }
-        let path = input.firstPressedExcept(gamepadScan!.usedPaths);
-        if (path !== null) {
-          setPath(path);
-        }
-        id.current = window.requestAnimationFrame(handleAnimationFrame);
       }
       id.current = window.requestAnimationFrame(handleAnimationFrame);
       return () => window.cancelAnimationFrame(id.current);
@@ -183,7 +188,10 @@ function PortInput({
   React.useEffect(() => {
     if (inputMapping.type === 'gamepad') {
       let id = { current: 0 };
+
       function handleAnimationFrame() {
+        id.current = window.requestAnimationFrame(handleAnimationFrame);
+
         let gamepadMapping = inputMapping as unknown as GamepadInputMapping;
         let newState: GamepadInput = {
           type: 'gamepad',
@@ -207,8 +215,6 @@ function PortInput({
         } else {
           setGamepadState(newState);
         }
-
-        id.current = window.requestAnimationFrame(handleAnimationFrame);
       }
       id.current = window.requestAnimationFrame(handleAnimationFrame);
       return () => window.cancelAnimationFrame(id.current);
@@ -234,8 +240,14 @@ function PortInput({
         <option value="unplugged">Unplugged</option>
         <option value="gamepad">Gamepad</option>
       </select>
-      {inputMapping.type === 'gamepad' && (
-        <button type="button" onClick={handleGamepadRemapClick} disabled={remapping}>Remap</button>
+      {inputMapping.type === 'gamepad' && !remapping && (
+        <button type="button" onClick={handleGamepadRemapClick}>Remap</button>
+      )}
+      {inputMapping.type === 'gamepad' && remapping && gamepadScan && (
+        <button type="button" onClick={handleGamepadRemapCancelClick}>Cancel</button>
+      )}
+      {inputMapping.type === 'gamepad' && remapping && !gamepadScan && (
+        <button type="button" disabled>Remap</button>
       )}
       {inputMapping.type === 'gamepad' && (
         <div className="gamepad">

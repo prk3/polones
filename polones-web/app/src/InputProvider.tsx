@@ -47,6 +47,17 @@ export default function InputProvider(props: { children: any }) {
               return !!gamepad.buttons[index].pressed || gamepad.buttons[index].value > 0.9;
             }
           }
+          else if (segments[2] === 'axis') {
+            let index = Number(segments[3]);
+            if (index < gamepad.axes.length) {
+              if (segments[4] === 'positive') {
+                return gamepad.axes[index] > 0.5;
+              }
+              else if (segments[4] === 'negative') {
+                return gamepad.axes[index] < -0.5;
+              }
+            }
+          }
         }
       }
     }
@@ -67,6 +78,20 @@ export default function InputProvider(props: { children: any }) {
       for (const [index, button] of gamepad.buttons.entries()) {
         if (button.pressed || button.value > 0.9) {
           const k: string = `gamepad.${gamepad.id.replaceAll('.', '')}.button.${index}`;
+          if (!except.has(k)) {
+            return k;
+          }
+        }
+      }
+      for (const [index, value] of gamepad.axes.entries()) {
+        if (value > 0.5) {
+          const k: string = `gamepad.${gamepad.id.replaceAll('.', '')}.axis.${index}.positive`;
+          if (!except.has(k)) {
+            return k;
+          }
+        }
+        else if (value < -0.5) {
+          const k: string = `gamepad.${gamepad.id.replaceAll('.', '')}.axis.${index}.negative`;
           if (!except.has(k)) {
             return k;
           }

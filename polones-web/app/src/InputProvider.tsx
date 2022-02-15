@@ -26,7 +26,7 @@ export default function InputProvider(props: { children: any }) {
   }
 
   function onblur(_event: FocusEvent) {
-    for (const key in keyboardStateRef.current) {
+    for (const key of keyboardStateRef.current.keys()) {
       keyboardStateRef.current.set(key, false);
     }
   }
@@ -65,8 +65,8 @@ export default function InputProvider(props: { children: any }) {
   }
 
   function firstPressedExcept(except: Set<string>): string | null {
-    for (const key in keyboardStateRef.current) {
-      if (keyboardStateRef.current.get(key) ?? false) {
+    for (const key of keyboardStateRef.current.keys()) {
+      if (keyboardStateRef.current.get(key) === true) {
         const k = `keyboard.key.${key}`;
         if (!except.has(k)) {
           return k;

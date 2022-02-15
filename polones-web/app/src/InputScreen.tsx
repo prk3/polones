@@ -225,7 +225,7 @@ function PortInput({
     if (gamepadScan) {
       return gamepadScan.current === button;
     }
-    else if (gamepadState) {
+    else if (gamepadState && !remapping) {
       return gamepadState[button];
     }
     else {

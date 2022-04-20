@@ -39,7 +39,7 @@ impl Io {
                     result
                 }
             },
-            _ => unreachable!(),
+            _ => unreachable!("IO: Read of {address:04X}"),
         }
     }
 
@@ -99,9 +99,9 @@ impl Io {
                 self.latch = value & 0b111;
             }
             0x4017 => {
-                eprintln!("IO: Write to 4017 ignored.");
+                unreachable!("IO: Write to 4017 should be handled by the Apu.");
             }
-            _ => unreachable!(),
+            _ => unreachable!("IO: Write to {address:04X}"),
         }
     }
 }

@@ -4,6 +4,7 @@ use crate::io::Io;
 use crate::mapper::{mapper_from_game_file, Mapper};
 use crate::ppu::Ppu;
 use crate::ram::Ram;
+use crate::apu::Apu;
 
 pub type Frame = [[(u8, u8, u8); 256]; 240];
 
@@ -43,6 +44,7 @@ pub trait Audio {
 pub struct Nes {
     pub cpu: Cpu,
     pub oam_dma: OamDma,
+    pub apu: Apu,
     pub io: Io,
     pub ppu: Ppu,
     pub mapper: Box<dyn Mapper>,
@@ -58,6 +60,10 @@ pub struct OamDma {
 impl OamDma {
     pub fn new() -> Self {
         Self { page: None }
+    }
+    pub fn read(&mut self, _address: u16) -> u8 {
+        eprintln!("OamDma: Unexpected read. Returning 0.");
+        0
     }
     pub fn write(&mut self, _address: u16, value: u8) {
         self.page = Some(value);
@@ -83,6 +89,7 @@ impl Nes {
         let ppu = Ppu::new(Box::new(display));
         let ppu_nametable_ram = Ram::new();
         let ppu_palette_ram = Ram::new();
+        let apu = Apu::new();
         let io = Io::new(Box::new(input));
 
         let mut nes = Self {
@@ -93,6 +100,7 @@ impl Nes {
             ppu,
             ppu_nametable_ram,
             ppu_palette_ram,
+            apu,
             io,
         };
 
@@ -127,6 +135,7 @@ impl Nes {
         let Nes {
             cpu,
             oam_dma,
+            apu,
             io,
             ppu,
             mapper,
@@ -139,6 +148,7 @@ impl Nes {
             cpu,
             CpuBus {
                 oam_dma,
+                apu,
                 io,
                 ppu,
                 mapper,
@@ -152,6 +162,7 @@ impl Nes {
 
 pub struct CpuBus<'a> {
     pub oam_dma: &'a mut OamDma,
+    pub apu: &'a mut Apu,
     pub io: &'a mut Io,
     pub ppu: &'a mut Ppu,
     pub mapper: &'a mut Box<dyn Mapper>,
@@ -186,7 +197,9 @@ impl<'a> CpuBus<'a> {
                 let (ppu, mut ppu_bus) = self.split_into_ppu_and_bus();
                 ppu.read(address, &mut ppu_bus)
             }
+            0x4014 => self.oam_dma.read(address),
             0x4016..=0x4017 => self.io.read(address),
+            0x4000..=0x401F => self.apu.read(address),
             address if self.mapper.cpu_address_mapped(address) => self.mapper.cpu_read(address),
             _ => {
                 eprintln!(
@@ -206,7 +219,8 @@ impl<'a> CpuBus<'a> {
                 ppu.write(address, value, &mut ppu_bus);
             }
             0x4014 => self.oam_dma.write(address, value),
-            0x4016..=0x4017 => self.io.write(address, value),
+            0x4016 => self.io.write(address, value),
+            0x4000..=0x401F => self.apu.write(address, value),
             address if self.mapper.cpu_address_mapped(address) => {
                 self.mapper.cpu_write(address, value)
             }

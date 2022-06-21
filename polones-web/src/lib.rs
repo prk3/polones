@@ -31,7 +31,8 @@ pub fn polones_start(rom: Vec<u8>) -> Option<String> {
     };
     let display = CanvasDisplay {};
     let input = WebInput {};
-    let nes = match Nes::new(game, display, input) {
+    let audio = WebAudio {};
+    let nes = match Nes::new(game, display, input, audio) {
         Ok(nes) => nes,
         Err(_err) => return Some("Could not start NES".into()),
     };
@@ -127,3 +128,5 @@ impl Input for WebInput {
         port_state_external_string_to_port_state(port_state_external_string)
     }
 }
+
+impl WEb

@@ -1,5 +1,5 @@
 use crate::cpu::Cpu;
-use crate::nes::CpuBus;
+use crate::nes::Audio;
 
 pub struct Pulse<const COMPLEMENT_EXTRA: u16> {
     enabled: bool,
@@ -145,10 +145,16 @@ pub struct Apu {
     frame_counter_interrupt: bool,
     frame_counter_interrupt_inhibit: bool,
     frame_counter: u16,
+
+    pulse1_samples: Vec<u8>,
+    audio: Box<dyn Audio>,
+
+    #[feature(draw_audio)]
+    draw_audio_samples: Vec<u8>,
 }
 
 impl Apu {
-    pub fn new() -> Self {
+    pub fn new(audio: Box<dyn Audio>) -> Self {
         Self {
             pulse1: Pulse {
                 enabled: false,
@@ -219,6 +225,12 @@ impl Apu {
             frame_counter_interrupt: false,
             frame_counter_interrupt_inhibit: false,
             frame_counter: 0,
+
+            pulse1_samples: Vec::with_capacity(11000), // CPU cycles in 256 audio cycles
+            audio,
+
+            #[feature(draw_audio)]
+            draw_audio_samples: Vec::with_capacity(5 * 1_700_000),
         }
     }
 
@@ -244,6 +256,9 @@ impl Apu {
     }
 
     pub fn write(&mut self, address: u16, value: u8) {
+        if (0x4000..=0x4003).contains(&address) {
+        println!("address: {address:04X}, value: {value:02X}");
+        }
         match address {
             0x4000 => {
                 self.pulse1.sequencer_duty = value >> 6;
@@ -254,7 +269,7 @@ impl Apu {
             }
             0x4001 => {
                 self.pulse1.sweep_enabled = (value & 0b10000000) > 0;
-                self.pulse1.sweep_divider_period = (value >> 4) & 0b111;
+                self.pulse1.sweep_divider_period = ((value >> 4) & 0b111) + 1;
                 self.pulse1.sweep_negate_flag = (value & 0b1000) > 0;
                 self.pulse1.sweep_shift_count = value & 0b111;
                 self.pulse1.sweep_reload_flag = true;
@@ -330,7 +345,7 @@ impl Apu {
         }
     }
 
-    pub fn update(&mut self, cpu: &mut Cpu, cpu_bus: &mut CpuBus) {
+    pub fn tick(&mut self, cpu: &mut Cpu) {
         if self.frame_counter_mode {
             // 5 step
             match self.frame_counter {
@@ -374,7 +389,9 @@ impl Apu {
                     self.noise.tick_length_counter();
                     self.frame_counter = 0;
                 }
-                _ => unreachable!(),
+                _ => {
+                    self.frame_counter += 1;
+                }
             }
         } else {
             // 4 step
@@ -408,7 +425,7 @@ impl Apu {
                 }
                 29828 => {
                     if !self.frame_counter_interrupt_inhibit {
-                        cpu.irq();
+                        // cpu.irq();
                         self.frame_counter_interrupt = true;
                     }
                     self.frame_counter += 1;
@@ -426,12 +443,55 @@ impl Apu {
                     self.noise.tick_length_counter();
                     self.frame_counter = 0;
                 }
-                _ => unreachable!(),
+                _ => {
+                    self.frame_counter += 1;
+                }
             }
         }
 
         // do some more stuff here
+        if !self.cpu_cycle_odd {
+            self.pulse1.tick();
+            self.pulse2.tick();
+        }
+
+        let sample = !self.pulse1.muted() as u8 * self.pulse1.volume();
+        self.pulse1_samples.push(sample);
+
+        #[feature(draw_audio)]
+        self.draw_audio_samples.push(sample);
+
+        if self.pulse1_samples.len() == (64.0f64 * (1_789_773.0 / 44_100.0)).round() as usize { // 64 * (CPU freq / audio freq)
+            let mut output_samples = [0u16; 64];
+            (0..64).for_each(|i| {
+                output_samples[i] = self.pulse1_samples[(i as f64 * (1_789_773.0 / 44_100.0)).round() as usize] as u16 * 1024;
+            });
+            self.pulse1_samples.clear();
+            self.audio.play(output_samples);
+        }
 
         self.cpu_cycle_odd = !self.cpu_cycle_odd;
+    }
+}
+
+#[feature(draw_audio)]
+impl Drop for Apu {
+    fn drop(&mut self) {
+        let result = (|| {
+            use std::io::Write;
+            use std::io::BufWriter;
+
+            let f = std::fs::File::create("./audio.pgm")?;
+            let mut f = BufWriter::with_capacity(1_000_000, f);
+            f.write(format!("P5 {} 15 255\n", self.draw_audio_samples.len()).as_bytes())?;
+            for i in (1..=15).rev() {
+                for s in &self.draw_audio_samples {
+                    f.write(&[if *s >= i { 0 } else { 255 }])?;
+                }
+            }
+
+            Result::<(), std::io::Error>::Ok(())
+        })();
+        println!("draw audio result: {result:?}");
     }
 }

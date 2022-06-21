@@ -2,8 +2,9 @@ use cpu_debugger::SdlCpuDebugger;
 use graphics_debugger::SdlGraphicsDebugger;
 use memory_debugger::SdlMemoryDebugger;
 use polones_core::game_file::GameFile;
-use polones_core::nes::{Display, Frame, Input, Nes, PortState};
+use polones_core::nes::{Audio, Display, Frame, Input, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
+use sdl2::audio::{AudioSpecDesired, AudioFormatNum};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -12,6 +13,7 @@ use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 mod cpu_debugger;
@@ -319,10 +321,25 @@ pub struct EmulatorState {
     one_step: bool,
 }
 
+use sdl2::audio::AudioQueue;
+
+#[derive(Clone)]
+struct DummyAudio {
+    queue: Rc<RefCell<AudioQueue<u16>>>,
+    samples: Rc<RefCell<Vec<u16>>>,
+}
+
+impl Audio for DummyAudio {
+    fn play(&mut self, samples: [u16; 64]) {
+        // self.queue.borrow_mut().queue(&samples[..]);
+        self.samples.borrow_mut().extend(&samples[..]);
+    }
+}
+
 fn main() {
-    let show_cpu_debugger = false;
-    let show_ppu_debugger = false;
-    let show_graphics_debugger = false;
+    let show_cpu_debugger = true;
+    let show_ppu_debugger = true;
+    let show_graphics_debugger = true;
     let show_memory_debugger = false;
 
     let args = std::env::args().collect::<Vec<String>>();
@@ -332,6 +349,17 @@ fn main() {
         .expect("file does not contain a nes game");
 
     let sdl_context = sdl2::init().unwrap();
+    let audio_subsystem = sdl_context.audio().unwrap();
+    let queue = audio_subsystem.open_queue::<u16, _>(
+        audio_subsystem.audio_playback_device_name(0).ok().as_deref() as Option<&str>,
+        &AudioSpecDesired {
+            freq: Some(44100),
+            channels: Some(1),
+            samples: Some(64),
+        },
+    ).unwrap();
+    queue.resume();
+
     let video_subsystem = sdl_context.video().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
@@ -416,10 +444,15 @@ fn main() {
         )
     });
 
+    let audio = DummyAudio {
+        queue: Rc::new(RefCell::new(queue)),
+        samples: Rc::new(RefCell::new(Vec::new())),
+    };
+
     let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
     let display = SdlDisplay::new(game_window.clone());
     let input = SdlInput::new(game_window.clone());
-    let mut nes = Nes::new(game_file, display, input).expect("Could not start the game");
+    let mut nes = Nes::new(game_file, display, input, audio.clone()).expect("Could not start the game");
 
     let mut state = EmulatorState {
         running: true,
@@ -444,7 +477,7 @@ fn main() {
     }
 
     loop {
-        let start_time = std::time::Instant::now();
+        // let start_time = std::time::Instant::now();
 
         for event in event_pump.poll_iter() {
             let event_id = event.get_window_id();
@@ -484,7 +517,8 @@ fn main() {
             }
         }
 
-        if state.exit {
+        if state.exit || audio.samples.borrow().len() > (44_100 * 2) {
+            write_wave(&audio.samples.borrow()).unwrap();
             break;
         }
 
@@ -495,21 +529,25 @@ fn main() {
             }
             state.one_step = false;
         } else if state.running {
-            for _ in 0..29829 {
-                nes.run_one_cpu_tick();
-                if let Some((_id, debugger)) = &mut cpu_debugger {
-                    debugger.update(&mut nes);
 
-                    if debugger.breakpoints.contains(&nes.cpu.program_counter) {
-                        while !nes.cpu.finished_instruction() {
-                            nes.run_one_cpu_tick();
-                            debugger.update(&mut nes);
+            // while (audio.queue.borrow().size() as usize) < 128 * std::mem::size_of::<u16>() {
+                for _ in 0..100_000 {
+                    nes.run_one_cpu_tick();
+                    if let Some((_id, debugger)) = &mut cpu_debugger {
+                        debugger.update(&mut nes);
+
+                        if debugger.breakpoints.contains(&nes.cpu.program_counter) {
+                            while !nes.cpu.finished_instruction() {
+                                nes.run_one_cpu_tick();
+                                debugger.update(&mut nes);
+                            }
+                            state.running = false;
+                            break;
                         }
-                        state.running = false;
-                        break;
                     }
                 }
-            }
+            // }
+            // std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
         game_window.borrow_mut().show();
@@ -526,11 +564,36 @@ fn main() {
             debugger.show(&mut nes);
         }
 
-        // 60fps
-        let nanos_to_sleep =
-            Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
-        if nanos_to_sleep != Duration::ZERO {
-            std::thread::sleep(nanos_to_sleep);
-        }
+        // // 60fps
+        // let nanos_to_sleep =
+        //     Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
+        // if nanos_to_sleep != Duration::ZERO {
+        //     std::thread::sleep(nanos_to_sleep);
+        // }
     }
+}
+
+fn write_wave(samples: &Vec<u16>) -> std::io::Result<()> {
+    use std::io::Write;
+    let file = std::fs::File::create("./audio.wav")?;
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+
+    writer.write(b"RIFF")?;
+    writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
+    writer.write(b"WAVE")?;
+    writer.write(b"fmt ")?;
+    writer.write(&16u32.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&44_100u32.to_le_bytes())?;
+    writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
+    writer.write(&(2u16).to_le_bytes())?;
+    writer.write(&(16u16).to_le_bytes())?;
+    writer.write(b"data")?;
+    writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
+
+    for (i, &s) in samples.iter().enumerate() {
+        writer.write(&s.to_le_bytes())?;
+    }
+    Ok(())
 }

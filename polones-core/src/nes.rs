@@ -37,7 +37,7 @@ pub trait Input {
 /// Abstraction over audio interface.
 pub trait Audio {
     /// Plays audio passed as a parameter.
-    fn play(&mut self, audio: ());
+    fn play(&mut self, samples: [u16; 64]);
 }
 
 /// Structure representing the entire console.
@@ -77,10 +77,11 @@ impl OamDma {
 }
 
 impl Nes {
-    pub fn new<D: Display + 'static, I: Input + 'static>(
+    pub fn new<D: Display + 'static, I: Input + 'static, A: Audio + 'static>(
         game: GameFile,
         display: D,
         input: I,
+        audio: A,
     ) -> Result<Self, &'static str> {
         let mapper = mapper_from_game_file(game)?;
         let cpu = Cpu::new();
@@ -89,7 +90,7 @@ impl Nes {
         let ppu = Ppu::new(Box::new(display));
         let ppu_nametable_ram = Ram::new();
         let ppu_palette_ram = Ram::new();
-        let apu = Apu::new();
+        let apu = Apu::new(Box::new(audio));
         let io = Io::new(Box::new(input));
 
         let mut nes = Self {
@@ -114,6 +115,7 @@ impl Nes {
         let (mut cpu, mut cpu_bus) = self.split_into_cpu_and_bus();
         cpu.tick(&mut cpu_bus);
         cpu_bus.oam_dma.tick(cpu);
+        cpu_bus.apu.tick(cpu);
 
         let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
         ppu.tick(&mut cpu, &mut ppu_bus);
@@ -198,8 +200,8 @@ impl<'a> CpuBus<'a> {
                 ppu.read(address, &mut ppu_bus)
             }
             0x4014 => self.oam_dma.read(address),
+            0x4000..=0x4015 => self.apu.read(address),
             0x4016..=0x4017 => self.io.read(address),
-            0x4000..=0x401F => self.apu.read(address),
             address if self.mapper.cpu_address_mapped(address) => self.mapper.cpu_read(address),
             _ => {
                 eprintln!(
@@ -220,7 +222,7 @@ impl<'a> CpuBus<'a> {
             }
             0x4014 => self.oam_dma.write(address, value),
             0x4016 => self.io.write(address, value),
-            0x4000..=0x401F => self.apu.write(address, value),
+            0x4000..=0x4017 => self.apu.write(address, value),
             address if self.mapper.cpu_address_mapped(address) => {
                 self.mapper.cpu_write(address, value)
             }

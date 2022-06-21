@@ -104,7 +104,7 @@ impl Cpu {
     }
 
     pub fn irq(&mut self) {
-        if self.status_register.get_interrupt() {
+        if !self.status_register.get_interrupt() {
             self.irq_requested = true;
         }
     }

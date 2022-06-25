@@ -141,14 +141,14 @@ impl Cpu {
 
         if self.nmi_requested {
             self.nmi_requested = false;
-            self.nmi_sleep_cycles = 7;
+            self.nmi_sleep_cycles = 6;
             self.run_nmi(cpu_bus);
             return;
         }
 
         if self.irq_requested {
             self.irq_requested = false;
-            self.irq_sleep_cycles = 7;
+            self.irq_sleep_cycles = 6;
             self.run_irq(cpu_bus);
             return;
         }
@@ -894,49 +894,49 @@ impl Cpu {
     fn run_00(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.break_or_interrupt(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_10(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_plus(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_20(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.jump_subroutine(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_30(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_minus(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_40(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.return_from_interrupt(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_50(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_overflow_clear(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_60(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.return_from_subroutine(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_70(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_overflow_set(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // 80 - illegal
@@ -944,145 +944,145 @@ impl Cpu {
     fn run_90(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_carry_clear(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_A0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.load_y(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_B0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_carry_set(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_C0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.compare_with_y(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_D0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_not_equal(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_E0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.compare_with_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_F0(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_relative(cpu_bus);
         self.branch_on_equal(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_01(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_11(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_21(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_31(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_41(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_51(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_61(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_71(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_81(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_91(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_A1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_B1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_C1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_D1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_E1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_x_indexed_indirect(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_F1(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect_y_indexed(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
@@ -1100,7 +1100,7 @@ impl Cpu {
     fn run_A2(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.load_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // B2 - illegal
@@ -1130,7 +1130,7 @@ impl Cpu {
     fn run_24(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.bit_test(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     // 34 - illegal
@@ -1142,31 +1142,31 @@ impl Cpu {
     fn run_84(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.store_y(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_94(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.store_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_A4(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.load_y(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_B4(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.load_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_C4(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.compare_with_y(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     // D4 - illegal
@@ -1174,7 +1174,7 @@ impl Cpu {
     fn run_E4(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.compare_with_x(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     // F4 - illegal
@@ -1182,193 +1182,193 @@ impl Cpu {
     fn run_05(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_15(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_25(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_35(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_45(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_55(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_65(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_75(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_85(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_95(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_A5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_B5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_C5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_D5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_E5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_F5(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_06(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.arithmetic_shift_left(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_16(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.arithmetic_shift_left(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_26(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.rotate_left(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_36(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.rotate_left(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_46(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.logical_shift_right(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_56(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.logical_shift_right(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_66(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.rotate_right(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_76(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.rotate_right(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_86(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.store_x(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_96(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_y_indexed(cpu_bus);
         self.store_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_A6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.load_x(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_B6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_y_indexed(cpu_bus);
         self.load_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_C6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.decrement(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_D6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.decrement(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_E6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage(cpu_bus);
         self.increment(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_F6(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_zeropage_x_indexed(cpu_bus);
         self.increment(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     // 07 - illegal
@@ -1391,148 +1391,148 @@ impl Cpu {
     fn run_08(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.push_processor_status(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_18(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.clear_carry(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_28(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.pull_processor_status(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_38(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.set_carry(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_48(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.push_accumulator(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_58(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.clear_interrupt_disable(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_68(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.pull_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_78(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.set_interrupt_disable(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_88(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.decrement_y(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_98(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_y_to_accumulator(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_A8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_accumulator_to_y(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_B8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.clear_overflow(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_C8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.increment_y(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_D8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.clear_decimal(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_E8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.increment_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_F8(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.set_decimal(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_09(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_19(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_29(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_39(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_49(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_59(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_69(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_79(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
@@ -1541,52 +1541,52 @@ impl Cpu {
     fn run_99(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_A9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_B9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_C9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_D9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_E9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_immediate(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_F9(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_0A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.arithmetic_shift_left(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // 1A - illegal
@@ -1594,7 +1594,7 @@ impl Cpu {
     fn run_2A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.rotate_left(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // 3A - illegal
@@ -1602,7 +1602,7 @@ impl Cpu {
     fn run_4A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.logical_shift_right(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // 5A - illegal
@@ -1610,7 +1610,7 @@ impl Cpu {
     fn run_6A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.rotate_right(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // 7A - illegal
@@ -1618,31 +1618,31 @@ impl Cpu {
     fn run_8A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_x_to_accumulator(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_9A(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_x_to_stack_pointer(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_AA(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_accumulator_to_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_BA(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.transfer_stack_pointer_to_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     fn run_CA(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.decrement_x(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // DA - illegal
@@ -1650,7 +1650,7 @@ impl Cpu {
     fn run_EA(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_implied(cpu_bus);
         self.no_operation(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 
     // FA - illegal
@@ -1676,7 +1676,7 @@ impl Cpu {
     fn run_2C(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.bit_test(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     // 3C - illegal
@@ -1684,7 +1684,7 @@ impl Cpu {
     fn run_4C(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.jump(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     // 5C - illegal
@@ -1692,7 +1692,7 @@ impl Cpu {
     fn run_6C(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_indirect(cpu_bus);
         self.jump(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     // 7C - illegal
@@ -1700,7 +1700,7 @@ impl Cpu {
     fn run_8C(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.store_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     // 9C - illegal
@@ -1708,20 +1708,20 @@ impl Cpu {
     fn run_AC(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.load_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_BC(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.load_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_CC(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.compare_with_y(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     // DC - illegal
@@ -1729,7 +1729,7 @@ impl Cpu {
     fn run_EC(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.compare_with_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     // FC - illegal
@@ -1737,158 +1737,158 @@ impl Cpu {
     fn run_0D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_1D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.or_with_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_2D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_3D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.and(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_4D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_5D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.exclusive_or(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_6D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_7D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.add_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_8D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_9D(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.store_accumulator(cpu_bus);
-        self.sleep_cycles += 5;
+        self.sleep_cycles += 4;
     }
 
     fn run_AD(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_BD(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.load_accumulator(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_CD(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_DD(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.compare(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_ED(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_FD(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.subtract_with_carry(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_0E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.arithmetic_shift_left(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_1E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.arithmetic_shift_left(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_2E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.rotate_left(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_3E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.rotate_left(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_4E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.logical_shift_right(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_5E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.logical_shift_right(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_6E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.rotate_right(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_7E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.rotate_right(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_8E(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.store_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     // 9E - illegal
@@ -1896,38 +1896,38 @@ impl Cpu {
     fn run_AE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.load_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
     }
 
     fn run_BE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_y_indexed(cpu_bus);
         self.load_x(cpu_bus);
-        self.sleep_cycles += 4;
+        self.sleep_cycles += 3;
         self.sleep_cycles += self.crossed_page_boundary as u8;
     }
 
     fn run_CE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.decrement(cpu_bus);
-        self.sleep_cycles += 3;
+        self.sleep_cycles += 2;
     }
 
     fn run_DE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.decrement(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     fn run_EE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute(cpu_bus);
         self.increment(cpu_bus);
-        self.sleep_cycles += 6;
+        self.sleep_cycles += 5;
     }
 
     fn run_FE(&mut self, cpu_bus: &mut CpuBus) {
         self.address_mode_absolute_x_indexed(cpu_bus);
         self.increment(cpu_bus);
-        self.sleep_cycles += 7;
+        self.sleep_cycles += 6;
     }
 
     // 0F - illegal
@@ -1955,7 +1955,7 @@ impl Cpu {
         );
         self.address_mode_implied(cpu_bus);
         self.no_operation(cpu_bus);
-        self.sleep_cycles += 2;
+        self.sleep_cycles += 1;
     }
 }
 

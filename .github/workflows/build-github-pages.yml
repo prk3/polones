@@ -7,45 +7,45 @@ jobs:
   build-github-pages:
     runs-on: ubuntu-latest
     steps:
-    
+
     # checkout master HEAD
     - uses: actions/checkout@v2
-     
+
     - run: |
         # install wasm-pack
         curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-        
+
         # prepare git for commits
         git config user.name "build-github-pages"
         git config user.email "build-github-pages@github.com"
-        
+
         # save master commit string in a file in /tmp directory
         echo "$(git rev-parse --short HEAD)" > /tmp/polones-commit
-        
+
         # build wasm module
         cd polones-web
         wasm-pack build --release
-        
+
         # build react web app
         cd app
         npm install
         npm run build
-        
+
         # save the output to /tmp directory
         cp -r build /tmp/polones-build
         cd ../..
-    
+
     # checkout github-pages HEAD
     - uses: actions/checkout@v2
       with:
         ref: github-pages
-    
+
     - run: |
         # replace contents of the github-pages branch with the new build
         rm -r *
         cp -r /tmp/polones-build/* .
-        
+
         # publish the changes
         git add .
-        git commit -m "build of master@$(cat /tmp/polones-commit)"
+        git commit --allow-empty -m "build of master@$(cat /tmp/polones-commit)"
         git push

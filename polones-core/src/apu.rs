@@ -481,11 +481,28 @@ impl Drop for Apu {
             use std::io::Write;
             use std::io::BufWriter;
 
+            let mut samples = Vec::new();
+            let mut silent_count = 0;
+            for (i, &sample) in self.draw_audio_samples.iter().enumerate() {
+                if sample == 0 {
+                    silent_count += 1;
+                    if silent_count < 1000 {
+                        samples.push(sample);
+                    }
+                } else {
+                    if silent_count >= 1000 {
+                        println!("Audio back at sample {i}");
+                    }
+                    silent_count = 0;
+                    samples.push(sample);
+                }
+            }
+
             let f = std::fs::File::create("./audio.pgm")?;
             let mut f = BufWriter::with_capacity(1_000_000, f);
-            f.write(format!("P5 {} 15 255\n", self.draw_audio_samples.len()).as_bytes())?;
+            f.write(format!("P5 {} 15 255\n", samples.len()).as_bytes())?;
             for i in (1..=15).rev() {
-                for s in &self.draw_audio_samples {
+                for s in &samples {
                     f.write(&[if *s >= i { 0 } else { 255 }])?;
                 }
             }

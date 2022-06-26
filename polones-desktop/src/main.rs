@@ -592,7 +592,7 @@ fn write_wave(samples: &Vec<u16>) -> std::io::Result<()> {
     writer.write(b"data")?;
     writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
 
-    for (i, &s) in samples.iter().enumerate() {
+    for s in samples.iter() {
         writer.write(&s.to_le_bytes())?;
     }
     Ok(())

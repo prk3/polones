@@ -1,11 +1,11 @@
-mod types;
 mod constants;
 mod parser;
+mod types;
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::io::BufWriter;
-use types::{Item, Instruction, Directive};
+use types::{Directive, Instruction, Item};
 
 use crate::parser::item;
 
@@ -15,8 +15,10 @@ struct Context {
     chr_rom: Vec<u8>,
     label_addresses: HashMap<String, usize>,
     label_addresses_local: HashMap<String, usize>,
-    address_slots: Vec<(String, usize)>,
-    address_slots_local: Vec<(String, usize)>,
+    address_slots_abs: Vec<(String, usize)>,
+    address_slots_rel: Vec<(String, usize)>,
+    address_slots_local_abs: Vec<(String, usize)>,
+    address_slots_local_rel: Vec<(String, usize)>,
 }
 
 impl Context {
@@ -27,8 +29,10 @@ impl Context {
             chr_rom: vec![0; 8 * 1024],
             label_addresses: HashMap::new(),
             label_addresses_local: HashMap::new(),
-            address_slots: Vec::new(),
-            address_slots_local: Vec::new(),
+            address_slots_abs: Vec::new(),
+            address_slots_rel: Vec::new(),
+            address_slots_local_abs: Vec::new(),
+            address_slots_local_rel: Vec::new(),
         }
     }
 }
@@ -55,13 +59,16 @@ fn main() {
     let lines: Vec<&str> = source.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
-        let (_, item_opt) = item(line)
-            .unwrap_or_else(|error| {
-                eprintln!("Parsing failed at line {i}: {line}");
-                eprintln!("{error}");
-                std::process::exit(1);
-            });
-        let item = if let Some(item) = item_opt { item } else { continue };
+        let (_, item_opt) = item(line).unwrap_or_else(|error| {
+            eprintln!("Parsing failed at line {}: {line}", i + 1);
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
+        let item = if let Some(item) = item_opt {
+            item
+        } else {
+            continue;
+        };
 
         if let Err(error) = process_item(item, &mut context) {
             eprintln!("Processing failed at line {i}: {line}");
@@ -70,7 +77,7 @@ fn main() {
         }
     }
 
-    if let Err(error) = finalize_context(&mut context) {
+    if let Err(error) = finalize_file_scope(&mut context) {
         eprintln!("Finalizing failed");
         eprintln!("{error}");
         std::process::exit(1);
@@ -105,24 +112,13 @@ fn process_item(item: Item, context: &mut Context) -> Result<(), String> {
         }
         Item::Label(label) => {
             // take care of local labels in the block that just ended
-            for (label, slot_address) in context.address_slots_local.drain(..) {
-                match context.label_addresses_local.get(&label) {
-                    Some(&code_address) => {
-
-                    }
-                    None => {
-                        return Err(format!("Local label {label:?} not defined"));
-                    }
-                }
-            }
+            finalize_label_scope(context)?;
             context.label_addresses_local = HashMap::new();
 
             // save new label
             let entry = context.label_addresses.entry(label);
             match entry {
-                Entry::Occupied(entry) => {
-                    Err(format!("Label {:?} already defined", entry.key()))
-                }
+                Entry::Occupied(entry) => Err(format!("Label {:?} already defined", entry.key())),
                 Entry::Vacant(entry) => {
                     entry.insert(context.prg_rom_pointer);
                     Ok(())
@@ -149,22 +145,42 @@ fn process_item(item: Item, context: &mut Context) -> Result<(), String> {
                 context.prg_rom_pointer += 3;
                 Ok(())
             }
-            Instruction::OpcodeAndLabel(opcode, label) => {
+            Instruction::OpcodeAbsAndLabel(opcode, label) => {
                 context.prg_rom[context.prg_rom_pointer] = opcode;
-                context.address_slots.push((label, context.prg_rom_pointer + 1));
+                context
+                    .address_slots_abs
+                    .push((label, context.prg_rom_pointer + 1));
                 context.prg_rom_pointer += 3;
                 Ok(())
             }
-            Instruction::OpcodeAndLabelLocal(opcode, label) => {
+            Instruction::OpcodeRelAndLabel(opcode, label) => {
                 context.prg_rom[context.prg_rom_pointer] = opcode;
-                context.address_slots_local.push((label, context.prg_rom_pointer + 1));
+                context
+                    .address_slots_rel
+                    .push((label, context.prg_rom_pointer + 1));
                 context.prg_rom_pointer += 2;
                 Ok(())
             }
-        }
+            Instruction::OpcodeAbsAndLocalLabel(opcode, label) => {
+                context.prg_rom[context.prg_rom_pointer] = opcode;
+                context
+                    .address_slots_local_abs
+                    .push((label, context.prg_rom_pointer + 1));
+                context.prg_rom_pointer += 3;
+                Ok(())
+            }
+            Instruction::OpcodeRelAndLocalLabel(opcode, label) => {
+                context.prg_rom[context.prg_rom_pointer] = opcode;
+                context
+                    .address_slots_local_rel
+                    .push((label, context.prg_rom_pointer + 1));
+                context.prg_rom_pointer += 2;
+                Ok(())
+            }
+        },
         Item::Directive(directive) => match directive {
-            Directive::PutAddressAtPrgAddress((lo, hi), prg_address) => {
-                if prg_address < context.prg_rom.len() - 2 {
+            Directive::PutAddressAtPrgAddress(lo, hi, prg_address) => {
+                if (0..=0x7FFE).contains(&prg_address) {
                     context.prg_rom[prg_address] = lo;
                     context.prg_rom[prg_address + 1] = hi;
                     Ok(())
@@ -173,8 +189,8 @@ fn process_item(item: Item, context: &mut Context) -> Result<(), String> {
                 }
             }
             Directive::PutAddressOfSubroutineAtPrgAddress(label, prg_address) => {
-                if prg_address < context.prg_rom.len() - 2 {
-                    context.address_slots.push((label, prg_address));
+                if (0..=0x7FFE).contains(&prg_address) {
+                    context.address_slots_abs.push((label, prg_address));
                     Ok(())
                 } else {
                     Err(format!("PRG address out of bounds"))
@@ -184,12 +200,47 @@ fn process_item(item: Item, context: &mut Context) -> Result<(), String> {
                 eprintln!("Found unknown directive: {words:?}");
                 Ok(())
             }
-        }
+        },
     }
 }
 
-fn finalize_context(context: &mut Context) -> Result<(), String> {
-    for (label, slot_address) in context.address_slots.drain(..) {
+fn finalize_label_scope(context: &mut Context) -> Result<(), String> {
+    for (label, slot_address) in context.address_slots_local_abs.drain(..) {
+        match context.label_addresses_local.get(&label) {
+            Some(&code_address) => {
+                // TODO these conversions will not ok for prg size > 32k
+                let code_address_on_cpu_bus = 0x8000 + code_address;
+                let lo = code_address_on_cpu_bus as u8;
+                let hi = (code_address_on_cpu_bus >> 8) as u8;
+
+                context.prg_rom[slot_address] = lo;
+                context.prg_rom[slot_address + 1] = hi;
+            }
+            None => {
+                return Err(format!("Local label {label:?} not defined"));
+            }
+        }
+    }
+    for (label, slot_address) in context.address_slots_local_rel.drain(..) {
+        match context.label_addresses_local.get(&label) {
+            Some(&code_address) => {
+                let offset = code_address as i64 - (slot_address as i64 + 1);
+                if let Ok(offset) = i8::try_from(offset) {
+                    context.prg_rom[slot_address] = offset.to_be_bytes()[0];
+                } else {
+                    return Err(format!("Code with {label:?} is too far"));
+                }
+            }
+            None => {
+                return Err(format!("Local label {label:?} not defined"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn finalize_file_scope(context: &mut Context) -> Result<(), String> {
+    for (label, slot_address) in context.address_slots_abs.drain(..) {
         match context.label_addresses.get(&label) {
             Some(&code_address) => {
                 // TODO these conversions will not ok for prg size > 32k
@@ -199,6 +250,21 @@ fn finalize_context(context: &mut Context) -> Result<(), String> {
 
                 context.prg_rom[slot_address] = lo;
                 context.prg_rom[slot_address + 1] = hi;
+            }
+            None => {
+                return Err(format!("Label {label:?} not defined"));
+            }
+        }
+    }
+    for (label, slot_address) in context.address_slots_rel.drain(..) {
+        match context.label_addresses.get(&label) {
+            Some(&code_address) => {
+                let offset = code_address as i64 - (slot_address as i64 + 1);
+                if let Ok(offset) = u8::try_from(offset) {
+                    context.prg_rom[slot_address] = offset;
+                } else {
+                    return Err(format!("Code with {label:?} is too far"));
+                }
             }
             None => {
                 return Err(format!("Label {label:?} not defined"));

@@ -55,7 +55,7 @@ pub fn item(input: &str) -> nom::IResult<&str, Option<Item>> {
                         space0,
                         eof,
                     )),
-                    |tuple| Directive::PutAddressAtPrgAddress(tuple.4, tuple.10),
+                    |tuple| Directive::PutAddressAtPrgAddress(tuple.4 .0, tuple.4 .1, tuple.10),
                 ),
                 map(
                     separated_list1(space1, take_while1(|c: char| !c.is_whitespace())),
@@ -78,6 +78,7 @@ pub fn item(input: &str) -> nom::IResult<&str, Option<Item>> {
     alt((
         map(instruction, |i| Some(Item::Instruction(i))),
         map(label_line, |l| Some(Item::Label(l))),
+        map(label_local_line, |l| Some(Item::LabelLocal(l))),
     ))(rest)
 }
 
@@ -112,15 +113,20 @@ fn instruction(input: &str) -> nom::IResult<&str, Instruction> {
             }
             AddressingMode::Absolute => {
                 if let Ok((rest, destination)) =
-                    delimited(space1, either_address_hex_or_label, tuple((space0, eof)))(rest)
+                    delimited(space1, abs_destination, tuple((space0, eof)))(rest)
                 {
                     return Ok((
                         rest,
                         match destination {
-                            Either::Left((lo, hi)) => {
+                            AbsDestination::Address(lo, hi) => {
                                 Instruction::OpcodeAndTwoBytes(*opcode, lo, hi)
                             }
-                            Either::Right(label) => Instruction::OpcodeAndLabel(*opcode, label),
+                            AbsDestination::Label(label) => {
+                                Instruction::OpcodeAbsAndLabel(*opcode, label)
+                            }
+                            AbsDestination::LabelLocal(label) => {
+                                Instruction::OpcodeAbsAndLocalLabel(*opcode, label)
+                            }
                         },
                     ));
                 }
@@ -186,14 +192,19 @@ fn instruction(input: &str) -> nom::IResult<&str, Instruction> {
             }
             AddressingMode::Relative => {
                 if let Ok((rest, destination)) =
-                    delimited(space1, either_byte_hex_or_label_local, tuple((space0, eof)))(rest)
+                    delimited(space1, rel_destination, tuple((space0, eof)))(rest)
                 {
                     return Ok((
                         rest,
                         match destination {
-                            Either::Left(byte) => Instruction::OpcodeAndByte(*opcode, byte),
-                            Either::Right(label) => {
-                                Instruction::OpcodeAndLabelLocal(*opcode, label)
+                            RelDestination::Offset(byte) => {
+                                Instruction::OpcodeAndByte(*opcode, byte)
+                            }
+                            RelDestination::Label(label) => {
+                                Instruction::OpcodeRelAndLabel(*opcode, label)
+                            }
+                            RelDestination::LabelLocal(label) => {
+                                Instruction::OpcodeRelAndLocalLabel(*opcode, label)
                             }
                         },
                     ));
@@ -260,14 +271,14 @@ fn address_hex(input: &str) -> nom::IResult<&str, (u8, u8)> {
 
 fn address_from_hex(input: &str) -> Result<(u8, u8), std::num::ParseIntError> {
     let value = u16::from_str_radix(input, 16)?;
-    Ok(((value >> 8) as u8, value as u8))
+    Ok((value as u8, (value >> 8) as u8))
 }
 
 fn label(input: &str) -> nom::IResult<&str, String> {
     map_res(
         tuple((
-            take_while1(|c: char| c.is_ascii() && c.is_alphabetic() || c == '_'),
-            take_while(|c: char| c.is_ascii() && c.is_alphanumeric() || c == '_'),
+            take_while1(|c: char| (c.is_ascii() && c.is_alphabetic()) || c == '_'),
+            take_while(|c: char| (c.is_ascii() && c.is_alphanumeric()) || c == '_'),
         )),
         |(start, end): (&str, &str)| Result::<_, Infallible>::Ok(format!("{start}{end}")),
     )(input)
@@ -277,7 +288,7 @@ fn label_local(input: &str) -> nom::IResult<&str, String> {
     map_res(
         preceded(
             char('@'),
-            take_while1(|c: char| c.is_ascii() && c.is_alphanumeric() || c == '_'),
+            take_while1(|c: char| (c.is_ascii() && c.is_alphanumeric()) || c == '_'),
         ),
         |label: &str| Result::<_, Infallible>::Ok(label.to_string()),
     )(input)
@@ -298,22 +309,31 @@ fn long_address_hex(input: &str) -> nom::IResult<&str, usize> {
     )(input)
 }
 
-enum Either<L, R> {
-    Left(L),
-    Right(R),
+enum AbsDestination {
+    Address(u8, u8),
+    Label(String),
+    LabelLocal(String),
 }
 
-fn either_address_hex_or_label(input: &str) -> nom::IResult<&str, Either<(u8, u8), String>> {
+fn abs_destination(input: &str) -> nom::IResult<&str, AbsDestination> {
     alt((
-        map(address_hex, |address| Either::Left(address)),
-        map(label, |label| Either::Right(label)),
+        map(address_hex, |(lo, hi)| AbsDestination::Address(lo, hi)),
+        map(label, AbsDestination::Label),
+        map(label_local, AbsDestination::LabelLocal),
     ))(input)
 }
 
-fn either_byte_hex_or_label_local(input: &str) -> nom::IResult<&str, Either<u8, String>> {
+enum RelDestination {
+    Offset(u8),
+    Label(String),
+    LabelLocal(String),
+}
+
+fn rel_destination(input: &str) -> nom::IResult<&str, RelDestination> {
     alt((
-        map(byte_hex, |byte| Either::Left(byte)),
-        map(label_local, |label| Either::Right(label)),
+        map(byte_hex, RelDestination::Offset),
+        map(label, RelDestination::Label),
+        map(label_local, RelDestination::LabelLocal),
     ))(input)
 }
 
@@ -344,8 +364,7 @@ mod tests {
         );
         assert_eq!(
             Ok(Some(Item::Directive(Directive::PutAddressAtPrgAddress(
-                (0x01, 0x23),
-                0xcdef
+                0x23, 0x01, 0xcdef
             )))),
             item_value(";! put address $0123 at prg $CDEF")
         );
@@ -373,22 +392,28 @@ mod tests {
         // address mode absolute
         assert_eq!(
             Ok(Some(Item::Instruction(Instruction::OpcodeAndTwoBytes(
-                0x4C, 0x09, 0xAF
+                0x4C, 0xAF, 0x09
             )))),
             item_value("JMP $09AF")
         );
         assert_eq!(
-            Ok(Some(Item::Instruction(Instruction::OpcodeAndLabel(
+            Ok(Some(Item::Instruction(Instruction::OpcodeAbsAndLabel(
                 0x4C,
                 "there".into()
             )))),
             item_value("JMP there")
         );
+        assert_eq!(
+            Ok(Some(Item::Instruction(
+                Instruction::OpcodeAbsAndLocalLabel(0x4C, "there".into())
+            ))),
+            item_value("JMP @there")
+        );
 
         // address mode absolute x indexed
         assert_eq!(
             Ok(Some(Item::Instruction(Instruction::OpcodeAndTwoBytes(
-                0x3D, 0x09, 0xAF
+                0x3D, 0xAF, 0x09
             )))),
             item_value("AND $09AF,X")
         );
@@ -396,7 +421,7 @@ mod tests {
         // address mode absolute y indexed
         assert_eq!(
             Ok(Some(Item::Instruction(Instruction::OpcodeAndTwoBytes(
-                0xBE, 0x09, 0xAF
+                0xBE, 0xAF, 0x09
             )))),
             item_value("LDX $09AF,Y")
         );
@@ -430,7 +455,7 @@ mod tests {
         // address mode indirect
         assert_eq!(
             Ok(Some(Item::Instruction(Instruction::OpcodeAndTwoBytes(
-                0x6C, 0xAB, 0xCD
+                0x6C, 0xCD, 0xAB
             )))),
             item_value("JMP ($abcd)")
         );
@@ -459,10 +484,16 @@ mod tests {
             item_value("BPL $FB")
         );
         assert_eq!(
-            Ok(Some(Item::Instruction(Instruction::OpcodeAndLabelLocal(
+            Ok(Some(Item::Instruction(Instruction::OpcodeRelAndLabel(
                 0x10,
                 "back".into()
             )))),
+            item_value("BPL back")
+        );
+        assert_eq!(
+            Ok(Some(Item::Instruction(
+                Instruction::OpcodeRelAndLocalLabel(0x10, "back".into())
+            ))),
             item_value("BPL @back")
         );
 
@@ -496,7 +527,7 @@ mod tests {
         assert_eq!(Ok((" ", 123)), byte_dec("123 "));
         assert_eq!(Ok((" ", 0x7F)), byte_hex("$7F "));
         assert_eq!(Ok((" ", 0b110011)), byte_bin("%110011 "));
-        assert_eq!(Ok((" ", (0xAB, 0x12))), address_hex("$AB12 "));
+        assert_eq!(Ok((" ", (0x12, 0xAB))), address_hex("$AB12 "));
         assert_eq!(Ok((" ", 0xabcd1234)), long_address_hex("$abcd1234 "));
     }
 
@@ -512,9 +543,9 @@ mod tests {
 
     #[test]
     fn parsing_local_labels() {
-        assert_eq!(Ok((" ", "Loop".into())), label("@Loop "));
-        assert_eq!(Ok((" ", "1".into())), label("@1 "));
-        assert!(matches!(label("abc"), Err(_)));
-        assert!(matches!(label("@:"), Err(_)));
+        assert_eq!(Ok((" ", "Loop".into())), label_local("@Loop "));
+        assert_eq!(Ok((" ", "1".into())), label_local("@1 "));
+        assert!(matches!(label_local("abc"), Err(_)));
+        assert!(matches!(label_local("@:"), Err(_)));
     }
 }

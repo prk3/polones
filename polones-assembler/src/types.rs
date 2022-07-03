@@ -1,4 +1,4 @@
-
+#[derive(PartialEq, Debug)]
 #[repr(u8)]
 pub enum AddressingMode {
     Accumulator,
@@ -21,14 +21,16 @@ pub enum Instruction {
     Opcode(u8),
     OpcodeAndByte(u8, u8),
     OpcodeAndTwoBytes(u8, u8, u8),
-    OpcodeAndLabel(u8, String),
-    OpcodeAndLabelLocal(u8, String),
+    OpcodeAbsAndLabel(u8, String),
+    OpcodeRelAndLabel(u8, String),
+    OpcodeAbsAndLocalLabel(u8, String),
+    OpcodeRelAndLocalLabel(u8, String),
 }
 
 #[derive(PartialEq, Debug)]
 pub enum Directive {
     PutAddressOfSubroutineAtPrgAddress(String, usize),
-    PutAddressAtPrgAddress((u8, u8), usize),
+    PutAddressAtPrgAddress(u8, u8, usize),
     Other(Vec<String>),
 }
 

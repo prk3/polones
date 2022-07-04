@@ -37,7 +37,7 @@ pub trait Input {
 /// Abstraction over audio interface.
 pub trait Audio {
     /// Plays audio passed as a parameter.
-    fn play(&mut self, samples: [u16; 64]);
+    fn play(&mut self, samples: &[u16; 64]);
 }
 
 /// Structure representing the entire console.

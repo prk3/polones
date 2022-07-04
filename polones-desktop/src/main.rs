@@ -1,10 +1,11 @@
+use apu_debugger::SdlApuDebugger;
 use cpu_debugger::SdlCpuDebugger;
 use graphics_debugger::SdlGraphicsDebugger;
 use memory_debugger::SdlMemoryDebugger;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Audio, Display, Frame, Input, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
-use sdl2::audio::{AudioSpecDesired, AudioFormatNum};
+use sdl2::audio::{AudioSpecDesired, AudioFormatNum, AudioCallback};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -21,6 +22,7 @@ mod graphics_debugger;
 mod memory_debugger;
 mod ppu_debugger;
 mod text_area;
+mod apu_debugger;
 
 struct SdlGameWindow {
     canvas: sdl2::render::WindowCanvas,
@@ -321,25 +323,28 @@ pub struct EmulatorState {
     one_step: bool,
 }
 
-use sdl2::audio::AudioQueue;
-
 #[derive(Clone)]
 struct DummyAudio {
-    queue: Rc<RefCell<AudioQueue<u16>>>,
+    //queue: Rc<RefCell<AudioQueue<u16>>>,
     samples: Rc<RefCell<Vec<u16>>>,
+    record: bool,
 }
 
 impl Audio for DummyAudio {
-    fn play(&mut self, samples: [u16; 64]) {
+    fn play(&mut self, samples: &[u16; 64]) {
         // self.queue.borrow_mut().queue(&samples[..]);
-        self.samples.borrow_mut().extend(&samples[..]);
+        // 1 minute of audio = 0.66MiB
+        if self.record && self.samples.borrow().len() < 60 * 44_100 {
+            self.samples.borrow_mut().extend(&samples[..]);
+        }
     }
 }
 
 fn main() {
     let show_cpu_debugger = true;
-    let show_ppu_debugger = true;
-    let show_graphics_debugger = true;
+    let show_ppu_debugger = false;
+    let show_apu_debugger = true;
+    let show_graphics_debugger = false;
     let show_memory_debugger = false;
 
     let args = std::env::args().collect::<Vec<String>>();
@@ -350,12 +355,24 @@ fn main() {
 
     let sdl_context = sdl2::init().unwrap();
     let audio_subsystem = sdl_context.audio().unwrap();
-    let queue = audio_subsystem.open_queue::<u16, _>(
-        audio_subsystem.audio_playback_device_name(0).ok().as_deref() as Option<&str>,
+    let queue = audio_subsystem.open_playback(
+        audio_subsystem.audio_playback_device_name(1).ok().as_deref() as Option<&str>,
         &AudioSpecDesired {
             freq: Some(44100),
             channels: Some(1),
             samples: Some(64),
+        },
+        |_| {
+            struct A {}
+            impl AudioCallback for A {
+                type Channel = u16;
+                fn callback(&mut self, buffer: &mut [Self::Channel]) {
+                    for sample in buffer {
+                        *sample = 0;
+                    }
+                }
+            }
+            A {}
         },
     ).unwrap();
     queue.resume();
@@ -407,6 +424,24 @@ fn main() {
         )
     });
 
+    let mut apu_debugger = show_apu_debugger.then(|| {
+        let apu_debugger_window = video_subsystem
+            .window(
+                "nes apu debugger",
+                SdlPpuDebugger::WIDTH * 3,
+                SdlPpuDebugger::HEIGHT * 3,
+            )
+            .position(768, 720)
+            .build()
+            .unwrap();
+        let apu_debugger_window_id = apu_debugger_window.id();
+        let apu_debugger_canvas = apu_debugger_window.into_canvas().build().unwrap();
+        (
+            apu_debugger_window_id,
+            SdlApuDebugger::new(apu_debugger_canvas),
+        )
+    });
+
     let mut memory_debugger = show_memory_debugger.then(|| {
         let memory_debugger_window = video_subsystem
             .window(
@@ -445,8 +480,9 @@ fn main() {
     });
 
     let audio = DummyAudio {
-        queue: Rc::new(RefCell::new(queue)),
+        // queue: Rc::new(RefCell::new(queue)),
         samples: Rc::new(RefCell::new(Vec::new())),
+        record: false,
     };
 
     let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
@@ -469,6 +505,9 @@ fn main() {
     if let Some((_id, debugger)) = &mut ppu_debugger {
         debugger.show(&mut nes);
     }
+    if let Some((_id, debugger)) = &mut apu_debugger {
+        debugger.show(&mut nes);
+    }
     if let Some((_id, debugger)) = &mut memory_debugger {
         debugger.show(&mut nes);
     }
@@ -477,7 +516,7 @@ fn main() {
     }
 
     loop {
-        // let start_time = std::time::Instant::now();
+        let start_time = std::time::Instant::now();
 
         for event in event_pump.poll_iter() {
             let event_id = event.get_window_id();
@@ -501,6 +540,13 @@ fn main() {
                 }
                 _ => {}
             }
+            match &mut apu_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut nes, &mut state);
+                    continue;
+                }
+                _ => {}
+            }
             match &mut memory_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
                     debugger.handle_event(event, &mut nes, &mut state);
@@ -517,8 +563,7 @@ fn main() {
             }
         }
 
-        if state.exit || audio.samples.borrow().len() > (44_100 * 2) {
-            write_wave(&audio.samples.borrow()).unwrap();
+        if state.exit {
             break;
         }
 
@@ -529,25 +574,21 @@ fn main() {
             }
             state.one_step = false;
         } else if state.running {
+            for _ in 0..(1_789_773 / 60) {
+                nes.run_one_cpu_tick();
+                if let Some((_id, debugger)) = &mut cpu_debugger {
+                    debugger.update(&mut nes);
 
-            // while (audio.queue.borrow().size() as usize) < 128 * std::mem::size_of::<u16>() {
-                for _ in 0..100_000 {
-                    nes.run_one_cpu_tick();
-                    if let Some((_id, debugger)) = &mut cpu_debugger {
-                        debugger.update(&mut nes);
-
-                        if debugger.breakpoints.contains(&nes.cpu.program_counter) {
-                            while !nes.cpu.finished_instruction() {
-                                nes.run_one_cpu_tick();
-                                debugger.update(&mut nes);
-                            }
-                            state.running = false;
-                            break;
+                    if debugger.breakpoints.contains(&nes.cpu.program_counter) {
+                        while !nes.cpu.finished_instruction() {
+                            nes.run_one_cpu_tick();
+                            debugger.update(&mut nes);
                         }
+                        state.running = false;
+                        break;
                     }
                 }
-            // }
-            // std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
 
         game_window.borrow_mut().show();
@@ -557,6 +598,9 @@ fn main() {
         if let Some((_id, debugger)) = &mut ppu_debugger {
             debugger.show(&mut nes);
         }
+        if let Some((_id, debugger)) = &mut apu_debugger {
+            debugger.show(&mut nes);
+        }
         if let Some((_id, debugger)) = &mut memory_debugger {
             debugger.show(&mut nes);
         }
@@ -564,18 +608,25 @@ fn main() {
             debugger.show(&mut nes);
         }
 
-        // // 60fps
-        // let nanos_to_sleep =
-        //     Duration::from_nanos(1_000_000_000u64 / 60).saturating_sub(start_time.elapsed());
-        // if nanos_to_sleep != Duration::ZERO {
-        //     std::thread::sleep(nanos_to_sleep);
-        // }
+        // 60fps
+        std::thread::sleep(std::time::Duration::from_micros(1_000_000 / 60).saturating_sub(start_time.elapsed()));
     }
 }
 
-fn write_wave(samples: &Vec<u16>) -> std::io::Result<()> {
+impl Drop for DummyAudio {
+    fn drop(&mut self) {
+        if self.record {
+            match write_wave("audio.wav", self.samples.borrow().as_slice()) {
+                Ok(_) => println!("Saved samples to audio.wav"),
+                Err(error) => eprintln!("Failed to save samples to audio.wav: {error}"),
+            }
+        }
+    }
+}
+
+fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
     use std::io::Write;
-    let file = std::fs::File::create("./audio.wav")?;
+    let file = std::fs::File::create(path)?;
     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
 
     writer.write(b"RIFF")?;

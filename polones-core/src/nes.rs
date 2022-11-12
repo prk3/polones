@@ -17,14 +17,14 @@ pub trait Display {
 pub enum PortState {
     Unplugged,
     Gamepad {
+        a: bool,
+        b: bool,
+        select: bool,
+        start: bool,
         up: bool,
         down: bool,
         left: bool,
         right: bool,
-        select: bool,
-        start: bool,
-        a: bool,
-        b: bool,
     },
 }
 

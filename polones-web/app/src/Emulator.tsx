@@ -29,8 +29,8 @@ export default function Emulator() {
 
   const [error, setError] = React.useState<string | null>(null);
   const [viewportSize, setViewportSize] = React.useState<[number, number]>([
-    window.visualViewport.width,
-    window.visualViewport.height
+    window.visualViewport?.width ?? 1280,
+    window.visualViewport?.height ?? 720,
   ]);
   const [state, setState] = React.useState<'rom' | 'running' | 'paused'>('rom');
   const [inputMappings, setInputMappings] = React.useState<InputMappings>((() => {
@@ -45,8 +45,8 @@ export default function Emulator() {
 
   function onresize(_event: UIEvent) {
     setViewportSize([
-      window.visualViewport.width,
-      window.visualViewport.height,
+      window.visualViewport?.width ?? 1280,
+      window.visualViewport?.height ?? 720,
     ]);
   }
 

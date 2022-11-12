@@ -3,7 +3,7 @@ use utils::set_panic_hook;
 use wasm_bindgen::{prelude::*, Clamped};
 
 use polones_core::game_file::GameFile;
-use polones_core::nes::{Display, Frame, Input, Nes, PortState};
+use polones_core::nes::{Display, Frame, Input, Nes, PortState, Audio};
 use serde::Deserialize;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
@@ -129,4 +129,10 @@ impl Input for WebInput {
     }
 }
 
-impl WEb
+struct WebAudio {}
+
+impl Audio for WebAudio {
+    fn play(&mut self, _samples: &[u16; 64]) {
+        // TODO
+    }
+}

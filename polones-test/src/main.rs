@@ -1,14 +1,10 @@
 use clap::Parser;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Audio, Display, Frame, Input, Nes, PortState};
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture, TextureAccess, TextureCreator};
 use sdl2::video::{Window, WindowContext};
-use std::borrow::Cow;
 use std::cell::RefCell;
-use std::fs;
 use std::path::Component;
 use std::rc::Rc;
 
@@ -158,6 +154,8 @@ fn main() {
             "flamegraph".into(),
             "--output".into(),
             format!("./flamegraphs/{rom_filename}.svg"),
+            "--freq".into(),
+            "20000".into(),
             "--".into(),
         ];
         flamegraph_args.extend(args.collect().into_iter());
@@ -196,7 +194,7 @@ fn main() {
     };
 
     let inputs_path = format!("./inputs/{}.bin", rom_filename);
-    let inputs = match fs::read(inputs_path) {
+    let inputs = match std::fs::read(inputs_path) {
         Ok(inputs) => inputs,
         Err(error) => {
             eprintln!("Could not read inputs file: {error}");

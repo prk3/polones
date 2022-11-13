@@ -579,7 +579,9 @@ fn main() {
                                 dbg!(2);
                                 if let Ok(rx) = self.audio_rx.lock() {
                                     dbg!(3);
-                                    if let Ok(received) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                                    if let Ok(received) =
+                                        rx.recv_timeout(std::time::Duration::from_secs(1))
+                                    {
                                         dbg!(4);
                                         for i in 0..64 {
                                             buffer[i] = received[i];
@@ -759,7 +761,6 @@ impl Drop for DummyAudio {
 }
 
 fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
-    use std::io::Write;
     let file = std::fs::File::create(path)?;
     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
 

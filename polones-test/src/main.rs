@@ -6,6 +6,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture, TextureAccess, TextureCreator};
 use sdl2::video::{Window, WindowContext};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fs;
 use std::path::Component;
@@ -94,19 +95,90 @@ impl Input for SdlInputShared {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     rom: String,
 
     #[arg(short, long)]
     preview: bool,
+
+    #[arg(short, long)]
+    flamegraph: bool,
+}
+
+impl Args {
+    fn collect(self) -> Vec<String> {
+        let Self {
+            rom,
+            preview,
+            flamegraph,
+        } = self;
+
+        let mut args = Vec::new();
+        if preview {
+            args.push("--preview".into());
+        }
+        if flamegraph {
+            args.push("--flamegraph".into());
+        }
+        args.push(rom);
+        args
+    }
 }
 
 fn main() {
     let args = Args::parse();
 
-    let rom_path = std::path::Path::new(&args.rom);
+    let rom_filename = {
+        let rom_path = std::path::Path::new(&args.rom);
+        match rom_path.components().last() {
+            Some(Component::Normal(normal)) => normal.to_string_lossy().into_owned(),
+            Some(_) => {
+                eprintln!("Path does not end with normal");
+                std::process::exit(1);
+            }
+            None => {
+                eprintln!("Path is empty");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    if args.flamegraph {
+        let args = Args {
+            flamegraph: false,
+            ..args
+        };
+
+        let mut flamegraph_command = std::process::Command::new("cargo");
+        flamegraph_command.env("CARGO_PROFILE_RELEASE_DEBUG", "true");
+
+        let mut flamegraph_args: Vec<String> = vec![
+            "flamegraph".into(),
+            "--output".into(),
+            format!("./flamegraphs/{rom_filename}.svg"),
+            "--".into(),
+        ];
+        flamegraph_args.extend(args.collect().into_iter());
+        flamegraph_command.args(flamegraph_args);
+
+        let mut child = match flamegraph_command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                eprintln!("Could not spawn flamegraph command: {error}");
+                std::process::exit(1);
+            }
+        };
+        let status = match child.wait() {
+            Ok(status) => status,
+            Err(error) => {
+                eprintln!("Could not wait for test result: {error}");
+                std::process::exit(1);
+            }
+        };
+        std::process::exit(status.code().unwrap_or(1))
+    }
 
     let file_contents = match std::fs::read(&args.rom) {
         Ok(contents) => contents,
@@ -123,13 +195,7 @@ fn main() {
         }
     };
 
-    let rom_path_last = rom_path.components().last().unwrap();
-    let rom_filename = match rom_path_last {
-        Component::Normal(normal) => normal,
-        _ => panic!("Path does not end with normal"),
-    };
-
-    let inputs_path = format!("./inputs/{}", rom_filename.to_string_lossy());
+    let inputs_path = format!("./inputs/{}.bin", rom_filename);
     let inputs = match fs::read(inputs_path) {
         Ok(inputs) => inputs,
         Err(error) => {
@@ -152,7 +218,12 @@ fn main() {
 
         let texture_creator = Box::new(canvas.texture_creator());
         let texture = texture_creator
-            .create_texture::<PixelFormatEnum>(PixelFormatEnum::RGB24, TextureAccess::Static, 256, 240)
+            .create_texture::<PixelFormatEnum>(
+                PixelFormatEnum::RGB24,
+                TextureAccess::Static,
+                256,
+                240,
+            )
             .unwrap();
 
         let texture = unsafe { std::mem::transmute::<Texture<'_>, Texture<'static>>(texture) };

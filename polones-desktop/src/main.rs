@@ -375,7 +375,7 @@ impl Audio for DummyAudio {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     rom: String,

@@ -1,5 +1,6 @@
 use crate::cpu::Cpu;
-use crate::nes::{Display, Frame, PpuBus};
+use crate::nes::{Frame, Peripherals, PpuBus};
+use crate::ram::Ram;
 
 pub static PALLETTE: [(u8, u8, u8); 64] = [
     (0x65, 0x65, 0x65),
@@ -68,7 +69,7 @@ pub static PALLETTE: [(u8, u8, u8); 64] = [
     (0x00, 0x00, 0x00),
 ];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(transparent)]
 pub struct ControlRegister(u8);
 
@@ -85,9 +86,6 @@ macro_rules! flag_methods {
 
 #[rustfmt::skip]
 impl ControlRegister {
-    fn new() -> Self {
-        Self(0)
-    }
     flag_methods!(get_nmi_enable,             set_nmi_enable,             7);
     flag_methods!(get_ppu_master_slave,       set_ppu_master_slave,       6);
     flag_methods!(get_sprite_height,          set_sprite_height,          5);
@@ -102,15 +100,12 @@ impl ControlRegister {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(transparent)]
 pub struct MaskRegister(u8);
 
 #[rustfmt::skip]
 impl MaskRegister {
-    fn new() -> Self {
-        Self(0)
-    }
     flag_methods!(get_emphasize_blue,                  set_emphasize_blue,                  7);
     flag_methods!(get_emphasize_green,                 set_emphasize_green,                 6);
     flag_methods!(get_emphasize_red,                   set_emphasize_red,                   5);
@@ -121,15 +116,12 @@ impl MaskRegister {
     flag_methods!(get_greyscale,                       set_greyscale,                       0);
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(transparent)]
 pub struct StatusRegister(u8);
 
 #[rustfmt::skip]
 impl StatusRegister {
-    fn new() -> Self {
-        Self(0)
-    }
     flag_methods!(get_vblank_flag,          set_vblank_flag,          7);
     flag_methods!(get_sprite_0_hit_flag,    set_sprite_0_hit_flag,    6);
     flag_methods!(get_sprite_overflow_flag, set_sprite_overflow_flag, 5);
@@ -140,12 +132,10 @@ impl StatusRegister {
 // ||| || +++++-------- coarse Y scroll
 // ||| ++-------------- nametable select
 // +++----------------- fine Y scroll
+#[derive(Clone, Copy, Default)]
 pub struct Loopy(pub u16);
 
 impl Loopy {
-    pub fn new() -> Self {
-        Self(0)
-    }
     pub fn get_coarse_x_scroll(&self) -> u8 {
         self.0 as u8 & 0b11111
     }
@@ -222,19 +212,17 @@ pub struct Ppu {
     sprite_0_current_scanline: bool,
     sprites_next_frame: usize,
     sprites_current_frame: usize,
-
-    display: Box<dyn Display>,
 }
 
 impl Ppu {
-    pub fn new(display: Box<dyn Display>) -> Self {
+    pub fn new() -> Self {
         Self {
             scanline: 0,
             dot: 0,
 
-            control_register: ControlRegister::new(),
-            mask_register: MaskRegister::new(),
-            status_register: StatusRegister::new(),
+            control_register: ControlRegister::default(),
+            mask_register: MaskRegister::default(),
+            status_register: StatusRegister::default(),
             vertical_scroll: 0,
             horizontal_scroll: 0,
             vblank: false,
@@ -246,8 +234,8 @@ impl Ppu {
             oam: [0; 256],
 
             odd: false,
-            v: Loopy::new(),
-            t: Loopy::new(),
+            v: Loopy::default(),
+            t: Loopy::default(),
             x: 0,
             w: false,
 
@@ -271,12 +259,10 @@ impl Ppu {
             sprite_0_current_scanline: false,
             sprites_next_frame: 0,
             sprites_current_frame: 0,
-
-            display,
         }
     }
 
-    pub fn tick(&mut self, cpu: &mut Cpu, ppu_bus: &mut PpuBus) {
+    pub fn tick(&mut self, cpu: &mut Cpu, ppu_bus: &mut PpuBus, peripherals: &mut Peripherals) {
         // vblank start
         if self.scanline == 241 && self.dot == 1 {
             self.vblank = true;
@@ -463,18 +449,18 @@ impl Ppu {
                         }
                     }
                 }
-                let get_bg_color = |ppu_bus: &mut PpuBus, color: u8, palette: u8| {
+                let get_bg_color = |palette_ram: &Ram<32>, color: u8, palette: u8| {
                     if color == 0b00 {
-                        ppu_bus.read(0x3F00) & 0b00111111
+                        palette_ram.read(0)
                     } else {
-                        ppu_bus.read(0x3F00 | (palette << 2) as u16 | color as u16) & 0b00111111
+                        palette_ram.read((palette << 2) as usize | color as usize)
                     }
                 };
-                let get_fg_color = |ppu_bus: &mut PpuBus, color: u8, palette: u8| {
+                let get_fg_color = |palette_ram: &Ram<32>, color: u8, palette: u8| {
                     if color == 0b00 {
-                        ppu_bus.read(0x3F10) & 0b00111111
+                        palette_ram.read(0x10)
                     } else {
-                        ppu_bus.read(0x3F10 | (palette << 2) as u16 | color as u16) & 0b00111111
+                        palette_ram.read(0x10 | (palette << 2) as usize | color as usize)
                     }
                 };
                 let get_rgb = |color: u8| PALLETTE[color as usize];
@@ -496,16 +482,16 @@ impl Ppu {
                         }
 
                         if (!fg_priority_back && fg_color != 0) || bg_color == 0 {
-                            get_rgb(get_fg_color(ppu_bus, fg_color, fg_palette))
+                            get_rgb(get_fg_color(ppu_bus.ppu_palette_ram, fg_color, fg_palette))
                         } else {
-                            get_rgb(get_bg_color(ppu_bus, bg_color, bg_palette))
+                            get_rgb(get_bg_color(ppu_bus.ppu_palette_ram, bg_color, bg_palette))
                         }
                     }
                     (Some((fg_color, fg_palette, _fg_priority, _sprite_index)), None) => {
-                        get_rgb(get_fg_color(ppu_bus, fg_color, fg_palette))
+                        get_rgb(get_fg_color(ppu_bus.ppu_palette_ram, fg_color, fg_palette))
                     }
                     (None, Some((bg_color, bg_palette))) => {
-                        get_rgb(get_bg_color(ppu_bus, bg_color, bg_palette))
+                        get_rgb(get_bg_color(ppu_bus.ppu_palette_ram, bg_color, bg_palette))
                     }
                     (None, None) => {
                         let ppu_addr = self.v.get_ppu_address() & 0b0011_1111_1111_1111;
@@ -594,9 +580,8 @@ impl Ppu {
         // display screen buffer if ready
         if self.buffer_index == 256 * 240 {
             self.buffer_index = 0;
-            let mut buffer = Box::new([[(0, 0, 0); 256]; 240]);
-            std::mem::swap(&mut buffer, &mut self.buffer);
-            self.display.draw(buffer);
+            std::mem::swap(&mut peripherals.display.frame, &mut self.buffer);
+            peripherals.display.version = peripherals.display.version.wrapping_add(1);
         }
 
         if self.dot == 257 {}

@@ -1,10 +1,10 @@
 use apu_debugger::SdlApuDebugger;
 use clap::Parser;
-use cpu_debugger::SdlCpuDebugger;
+use cpu_debugger::{SdlCpuDebugger, SharedCpuState};
 use graphics_debugger::SdlGraphicsDebugger;
 use memory_debugger::SdlMemoryDebugger;
 use polones_core::game_file::GameFile;
-use polones_core::nes::{Audio, Display, Frame, Input, Nes, PortState};
+use polones_core::nes::{Frame, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use sdl2::event::Event;
@@ -13,10 +13,8 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
-use std::cell::RefCell;
 use std::io::Write;
-use std::rc::Rc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 mod apu_debugger;
 mod cpu_debugger;
@@ -46,7 +44,7 @@ struct SdlGameWindow {
     gamepad_2_a: bool,
     gamepad_2_b: bool,
     frame: Box<Frame>,
-    frame_generation_time: std::time::Instant,
+    version: u32,
 }
 
 impl SdlGameWindow {
@@ -91,19 +89,19 @@ impl SdlGameWindow {
             gamepad_2_a: false,
             gamepad_2_b: false,
             frame: Box::new([[(0, 0, 0); 256]; 240]),
-            frame_generation_time: std::time::Instant::now(),
+            version: 0,
         }
     }
 
-    fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
+    fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
         match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::Escape),
                 ..
             } => {
-                state.exit = true;
-            }
-            Event::Quit { .. } => {
                 state.exit = true;
             }
             Event::KeyDown {
@@ -262,117 +260,22 @@ impl SdlGameWindow {
     }
 }
 
-struct SdlDisplay {
-    inner: Rc<RefCell<SdlGameWindow>>,
-}
+// writer
+//                 .write(&[(inner.gamepad_1_a as u8) << 7
+//                     | (inner.gamepad_1_b as u8) << 6
+//                     | (inner.gamepad_1_select as u8) << 5
+//                     | (inner.gamepad_1_start as u8) << 4
+//                     | (inner.gamepad_1_up as u8) << 3
+//                     | (inner.gamepad_1_down as u8) << 2
+//                     | (inner.gamepad_1_left as u8) << 1
+//                     | (inner.gamepad_1_right as u8)])
+//                 .expect("Could not write input from port 1");
 
-impl SdlDisplay {
-    fn new(inner: Rc<RefCell<SdlGameWindow>>) -> Self {
-        Self { inner }
-    }
-}
-
-impl Display for SdlDisplay {
-    fn draw(&mut self, frame: Box<Frame>) {
-        let mut inner = self.inner.borrow_mut();
-        inner.frame = frame;
-        inner.frame_generation_time = std::time::Instant::now();
-    }
-}
-
-struct SdlInput {
-    inner: Rc<RefCell<SdlGameWindow>>,
-    record_inputs_writer: Option<std::io::BufWriter<std::fs::File>>,
-}
-
-impl SdlInput {
-    pub fn new(inner: Rc<RefCell<SdlGameWindow>>, record_inputs_file: Option<&str>) -> Self {
-        Self {
-            inner,
-            record_inputs_writer: record_inputs_file.map(|file| {
-                std::io::BufWriter::with_capacity(
-                    1024 * 16,
-                    std::fs::File::create(file).expect("Could not open input file for writing"),
-                )
-            }),
-        }
-    }
-}
-
-impl Input for SdlInput {
-    fn read_port_1(&mut self) -> PortState {
-        let inner = self.inner.borrow_mut();
-        if let Some(writer) = &mut self.record_inputs_writer {
-            writer
-                .write(&[(inner.gamepad_1_a as u8) << 7
-                    | (inner.gamepad_1_b as u8) << 6
-                    | (inner.gamepad_1_select as u8) << 5
-                    | (inner.gamepad_1_start as u8) << 4
-                    | (inner.gamepad_1_up as u8) << 3
-                    | (inner.gamepad_1_down as u8) << 2
-                    | (inner.gamepad_1_left as u8) << 1
-                    | (inner.gamepad_1_right as u8)])
-                .expect("Could not write input from port 1");
-        }
-        PortState::Gamepad {
-            up: inner.gamepad_1_up,
-            down: inner.gamepad_1_down,
-            left: inner.gamepad_1_left,
-            right: inner.gamepad_1_right,
-            select: inner.gamepad_1_select,
-            start: inner.gamepad_1_start,
-            a: inner.gamepad_1_a,
-            b: inner.gamepad_1_b,
-        }
-    }
-    fn read_port_2(&mut self) -> PortState {
-        let inner = self.inner.borrow_mut();
-        if let Some(writer) = &mut self.record_inputs_writer {
-            writer
-                .write(&[(inner.gamepad_2_a as u8) << 7
-                    | (inner.gamepad_2_b as u8) << 6
-                    | (inner.gamepad_2_select as u8) << 5
-                    | (inner.gamepad_2_start as u8) << 4
-                    | (inner.gamepad_2_up as u8) << 3
-                    | (inner.gamepad_2_down as u8) << 2
-                    | (inner.gamepad_2_left as u8) << 1
-                    | (inner.gamepad_2_right as u8)])
-                .expect("Could not write input from port 2");
-        }
-        PortState::Gamepad {
-            up: inner.gamepad_2_up,
-            down: inner.gamepad_2_down,
-            left: inner.gamepad_2_left,
-            right: inner.gamepad_2_right,
-            select: inner.gamepad_2_select,
-            start: inner.gamepad_2_start,
-            a: inner.gamepad_2_a,
-            b: inner.gamepad_2_b,
-        }
-    }
-}
-
+#[derive(Clone)]
 pub struct EmulatorState {
     running: bool,
     exit: bool,
     one_step: bool,
-}
-
-struct DummyAudio {
-    audio_tx: std::sync::mpsc::Sender<Vec<u16>>,
-    record_samples: Vec<u16>,
-    record: bool,
-}
-
-impl Audio for DummyAudio {
-    fn play(&mut self, samples: &[u16; 64]) {
-        let _ = self.audio_tx.send(samples.to_vec());
-
-        // 1 minute of audio = 0.66MiB
-        if self.record && self.record_samples.len() < 60 * 44_100 {
-            self.record_samples.extend(&samples[..]);
-        }
-    }
 }
 
 #[derive(Parser)]
@@ -402,13 +305,24 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let file_contents = std::fs::read(&args.rom).expect("could not read the file");
-    let game_file =
-        GameFile::read(args.rom.clone(), file_contents).expect("file does not contain a nes game");
+    let rom_data = match std::fs::read(&args.rom) {
+        Ok(rom_data) => rom_data,
+        Err(error) => {
+            eprintln!("Could not read ROM: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    let game_file = match GameFile::read(args.rom.clone(), rom_data) {
+        Ok(game_file) => game_file,
+        Err(_error) => {
+            eprintln!("Could not parse ROM");
+            std::process::exit(1);
+        }
+    };
 
     let sdl_context = sdl2::init().unwrap();
     let audio_subsystem = sdl_context.audio().unwrap();
-
     let video_subsystem = sdl_context.video().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
@@ -422,7 +336,12 @@ fn main() {
         .build()
         .unwrap();
     let game_window_id = game_window.id();
-    let game_canvas = game_window.into_canvas().build().unwrap();
+    let game_canvas = game_window
+        .into_canvas()
+        .present_vsync()
+        .accelerated()
+        .build()
+        .unwrap();
 
     let mut cpu_debugger = args.cpu_debugger.then(|| {
         let cpu_debugger_window = video_subsystem
@@ -435,10 +354,16 @@ fn main() {
             .build()
             .unwrap();
         let cpu_debugger_window_id = cpu_debugger_window.id();
-        let cpu_debugger_canvas = cpu_debugger_window.into_canvas().build().unwrap();
+        let cpu_debugger_canvas = cpu_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
+        let shared_cpu_state = Arc::new(Mutex::new(SharedCpuState::default()));
         (
             cpu_debugger_window_id,
-            SdlCpuDebugger::new(cpu_debugger_canvas),
+            SdlCpuDebugger::new(cpu_debugger_canvas, shared_cpu_state.clone()),
+            shared_cpu_state,
         )
     });
 
@@ -453,7 +378,11 @@ fn main() {
             .build()
             .unwrap();
         let ppu_debugger_window_id = ppu_debugger_window.id();
-        let ppu_debugger_canvas = ppu_debugger_window.into_canvas().build().unwrap();
+        let ppu_debugger_canvas = ppu_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
         (
             ppu_debugger_window_id,
             SdlPpuDebugger::new(ppu_debugger_canvas),
@@ -471,7 +400,11 @@ fn main() {
             .build()
             .unwrap();
         let apu_debugger_window_id = apu_debugger_window.id();
-        let apu_debugger_canvas = apu_debugger_window.into_canvas().build().unwrap();
+        let apu_debugger_canvas = apu_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
         (
             apu_debugger_window_id,
             SdlApuDebugger::new(apu_debugger_canvas),
@@ -489,7 +422,11 @@ fn main() {
             .build()
             .unwrap();
         let memory_debugger_window_id = memory_debugger_window.id();
-        let memory_debugger_canvas = memory_debugger_window.into_canvas().build().unwrap();
+        let memory_debugger_canvas = memory_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
         (
             memory_debugger_window_id,
             SdlMemoryDebugger::new(memory_debugger_canvas),
@@ -507,100 +444,19 @@ fn main() {
             .build()
             .unwrap();
         let graphics_debugger_window_id = graphics_debugger_window.id();
-        let graphics_debugger_window_canvas =
-            graphics_debugger_window.into_canvas().build().unwrap();
+        let graphics_debugger_window_canvas = graphics_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
         (
             graphics_debugger_window_id,
             SdlGraphicsDebugger::new(graphics_debugger_window_canvas),
         )
     });
 
-    let (audio_tx, audio_rx) = std::sync::mpsc::channel();
-    // There is no easy way of removing audio_rx from one AudioRunner
-    // and adding it to another. So instead we share audio_rx with an
-    // Arc and Mutex. This is probably fine as there should only be
-    // one AudioRunner at one time.
-    let audio_rx = std::sync::Arc::new(std::sync::Mutex::new(audio_rx));
-    let (notification_tx, notification_rx) = std::sync::mpsc::channel();
-
-    let audio = DummyAudio {
-        audio_tx,
-        record_samples: Vec::new(),
-        record: false,
-    };
-
-    let game_window = Rc::new(RefCell::new(SdlGameWindow::new(game_canvas)));
-    let display = SdlDisplay::new(game_window.clone());
-    let input = SdlInput::new(game_window.clone(), args.record_inputs_file.as_deref());
-    let mut nes = Nes::new(game_file, display, input, audio).expect("Could not start the game");
-
-    game_window.borrow_mut().show();
-
-    if let Some((_id, debugger)) = &mut cpu_debugger {
-        debugger.update(&mut nes);
-        debugger.show(&mut nes);
-    }
-    if let Some((_id, debugger)) = &mut ppu_debugger {
-        debugger.show(&mut nes);
-    }
-    if let Some((_id, debugger)) = &mut apu_debugger {
-        debugger.show(&mut nes);
-    }
-    if let Some((_id, debugger)) = &mut memory_debugger {
-        debugger.show(&mut nes);
-    }
-    if let Some((_id, debugger)) = &mut graphics_debugger {
-        debugger.show(&mut nes);
-    }
-
-    let create_playback = move |notification_tx, audio_rx| {
-        let a = audio_subsystem
-            .open_playback(
-                audio_subsystem
-                    .audio_playback_device_name(0)
-                    .ok()
-                    .as_deref() as Option<&str>,
-                &AudioSpecDesired {
-                    freq: Some(44100),
-                    channels: Some(1),
-                    samples: Some(64),
-                },
-                |_| {
-                    struct AudioRunner {
-                        notification_tx: std::sync::mpsc::Sender<u8>,
-                        audio_rx:
-                            std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<Vec<u16>>>>,
-                    }
-                    impl AudioCallback for AudioRunner {
-                        type Channel = u16;
-                        fn callback(&mut self, buffer: &mut [Self::Channel]) {
-                            dbg!(1);
-                            if self.notification_tx.send(1).is_ok() {
-                                dbg!(2);
-                                if let Ok(rx) = self.audio_rx.lock() {
-                                    dbg!(3);
-                                    if let Ok(received) =
-                                        rx.recv_timeout(std::time::Duration::from_secs(1))
-                                    {
-                                        dbg!(4);
-                                        for i in 0..64 {
-                                            buffer[i] = received[i];
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    AudioRunner {
-                        notification_tx,
-                        audio_rx,
-                    }
-                },
-            )
-            .unwrap();
-        a.resume();
-        a
-    };
+    let mut game_window = SdlGameWindow::new(game_canvas);
+    let mut nes = Nes::new(game_file).expect("Could not start the game");
 
     let mut state = EmulatorState {
         running: true,
@@ -608,157 +464,213 @@ fn main() {
         one_step: false,
     };
 
-    let mut playback = if state.running {
-        Some(create_playback(notification_tx.clone(), audio_rx.clone()))
-    } else {
-        None
-    };
+    if let Some((_id, debugger, _)) = &mut cpu_debugger {
+        debugger.update(&mut nes);
+        debugger.draw();
+    }
+    if let Some((_id, debugger)) = &mut ppu_debugger {
+        debugger.update(&mut nes);
+        debugger.draw();
+    }
+    if let Some((_id, debugger)) = &mut apu_debugger {
+        debugger.update(&mut nes);
+        debugger.draw();
+    }
+    if let Some((_id, debugger)) = &mut memory_debugger {
+        debugger.update(&mut nes);
+        debugger.draw();
+    }
+    if let Some((_id, debugger)) = &mut graphics_debugger {
+        debugger.update(&mut nes);
+        debugger.draw();
+    }
 
-    let mut last_frame_time = std::time::Instant::now();
+    game_window.show();
 
-    loop {
-        let mut game_window_ref = game_window.borrow_mut();
+    let emulator = Arc::new(Mutex::new((
+        state.clone(),
+        nes,
+        cpu_debugger.as_ref().map(|(_, _, state)| state.clone()),
+    )));
 
-        if !state.running || game_window_ref.frame_generation_time != last_frame_time {
-            let old_running = state.running;
+    let audio = audio_subsystem
+        .open_playback(
+            audio_subsystem
+                .audio_playback_device_name(0)
+                .ok()
+                .as_deref() as Option<&str>,
+            &AudioSpecDesired {
+                freq: Some(44100),
+                channels: Some(1),
+                samples: Some(64),
+            },
+            |_| AudioRunner {
+                emulator: emulator.clone(),
+                version: 0,
+            },
+        )
+        .unwrap();
+    audio.resume();
 
-            for event in event_pump.poll_iter() {
-                let event_id = event.get_window_id();
-                if event.get_window_id() == Some(game_window_id) {
-                    game_window_ref.handle_event(event, &mut nes, &mut state);
+    'ui_loop: loop {
+        // keep prev state for comparisons
+        let prev_state = state.clone();
+
+        // handle window events
+        for event in event_pump.poll_iter() {
+            let event_id = event.get_window_id();
+            if event.get_window_id() == Some(game_window_id) {
+                game_window.handle_event(event, &mut state);
+                continue;
+            }
+            match &mut cpu_debugger {
+                Some((id, debugger, _)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut state);
                     continue;
                 }
-                match &mut cpu_debugger {
-                    Some((id, debugger)) if event_id == Some(*id) => {
-                        debugger.handle_event(event, &mut nes, &mut state);
-                        continue;
-                    }
-                    _ => {}
+                _ => {}
+            }
+            match &mut ppu_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut state);
+                    continue;
                 }
-                match &mut ppu_debugger {
-                    Some((id, debugger)) if event_id == Some(*id) => {
-                        debugger.handle_event(event, &mut nes, &mut state);
-                        continue;
-                    }
-                    _ => {}
+                _ => {}
+            }
+            match &mut apu_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut state);
+                    continue;
                 }
-                match &mut apu_debugger {
-                    Some((id, debugger)) if event_id == Some(*id) => {
-                        debugger.handle_event(event, &mut nes, &mut state);
-                        continue;
-                    }
-                    _ => {}
+                _ => {}
+            }
+            match &mut memory_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut state);
+                    continue;
                 }
-                match &mut memory_debugger {
-                    Some((id, debugger)) if event_id == Some(*id) => {
-                        debugger.handle_event(event, &mut nes, &mut state);
-                        continue;
-                    }
-                    _ => {}
+                _ => {}
+            }
+            match &mut graphics_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(event, &mut state);
+                    continue;
                 }
-                match &mut graphics_debugger {
-                    Some((id, debugger)) if event_id == Some(*id) => {
-                        debugger.handle_event(event, &mut nes, &mut state);
-                        continue;
-                    }
-                    _ => {}
-                }
+                _ => {}
             }
-
-            if state.exit {
-                break;
-            }
-
-            if old_running != state.running {
-                if state.running {
-                    playback = Some(create_playback(notification_tx.clone(), audio_rx.clone()));
-                } else {
-                    playback = None;
-                }
-            }
-
-            if !state.running && state.one_step {
-                nes.run_one_cpu_instruction();
-                if let Some((_id, debugger)) = &mut cpu_debugger {
-                    debugger.update(&mut nes);
-                }
-                state.one_step = false;
-            }
-
-            game_window_ref.show();
-
-            if let Some((_id, debugger)) = &mut cpu_debugger {
-                debugger.show(&mut nes);
-            }
-            if let Some((_id, debugger)) = &mut ppu_debugger {
-                debugger.show(&mut nes);
-            }
-            if let Some((_id, debugger)) = &mut apu_debugger {
-                debugger.show(&mut nes);
-            }
-            if let Some((_id, debugger)) = &mut memory_debugger {
-                debugger.show(&mut nes);
-            }
-            if let Some((_id, debugger)) = &mut graphics_debugger {
-                debugger.show(&mut nes);
-            }
-
-            last_frame_time = game_window_ref.frame_generation_time;
         }
 
-        let refresh_rate = game_window_ref
-            .canvas
-            .window()
-            .display_mode()
-            .map_or(60, |m| m.refresh_rate);
-
-        drop(game_window_ref);
-
-        // If emulation is running, sleep the thread until more samples are requested.
-        if state.running {
-            match notification_rx.recv() {
-                Ok(_) => {
-                    if state.running {
-                        for _ in 0..(64 * 1_789_773 / 44_100) {
-                            nes.run_one_cpu_tick();
-                            if let Some((_id, debugger)) = &mut cpu_debugger {
-                                debugger.update(&mut nes);
-
-                                if debugger.breakpoints.contains(&nes.cpu.program_counter) {
-                                    while !nes.cpu.finished_instruction() {
-                                        nes.run_one_cpu_tick();
-                                        debugger.update(&mut nes);
-                                    }
-                                    state.running = false;
-                                    playback = None;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(_) => break,
-            };
-        // If emulation is not running, sleep the thread for approx. one frame.
-        } else {
-            std::thread::sleep(Duration::from_nanos(1_000_000_000 / refresh_rate as u64));
+        // exit if UI thread requested exit
+        if state.exit {
+            break 'ui_loop;
         }
+
+        // acquire access to nes and state
+        let mut guard = emulator.lock().unwrap();
+        let (audio_state, nes, _) = &mut *guard;
+
+        // update nes controls
+        nes.input.port_1 = PortState::Gamepad {
+            a: game_window.gamepad_1_a,
+            b: game_window.gamepad_1_b,
+            select: game_window.gamepad_1_select,
+            start: game_window.gamepad_1_start,
+            up: game_window.gamepad_1_up,
+            down: game_window.gamepad_1_down,
+            left: game_window.gamepad_1_left,
+            right: game_window.gamepad_1_right,
+        };
+        nes.input.port_2 = PortState::Gamepad {
+            a: game_window.gamepad_2_a,
+            b: game_window.gamepad_2_b,
+            select: game_window.gamepad_2_select,
+            start: game_window.gamepad_2_start,
+            up: game_window.gamepad_2_up,
+            down: game_window.gamepad_2_down,
+            left: game_window.gamepad_2_left,
+            right: game_window.gamepad_2_right,
+        };
+        nes.input.version = nes.input.version.wrapping_add(1);
+
+        // handle one instruction step request
+        if state.one_step {
+            nes.run_one_cpu_instruction();
+            if let Some((_id, _debugger, cpu_state)) = &mut cpu_debugger {
+                let mut cpu_state = cpu_state
+                    .try_lock()
+                    .expect("cpu state should not be locked when nes is not locked");
+                cpu_state.update_instructions(nes);
+            }
+            state.running = false;
+            state.one_step = false;
+        }
+
+        // either user or breakpoint stopped emulation
+        if prev_state.running && (!state.running | !audio_state.running) {
+            state.running = false;
+            audio_state.running = false;
+        }
+
+        // user unpaused emulation
+        if !prev_state.running && state.running {
+            state.running = true;
+            audio_state.running = true;
+        }
+
+        // update windows with current nes state
+        if let Some((_id, debugger, _)) = &mut cpu_debugger {
+            debugger.update(nes);
+        }
+        if let Some((_id, debugger)) = &mut ppu_debugger {
+            debugger.update(nes);
+        }
+        if let Some((_id, debugger)) = &mut apu_debugger {
+            debugger.update(nes);
+        }
+        if let Some((_id, debugger)) = &mut memory_debugger {
+            debugger.update(nes);
+        }
+        if let Some((_id, debugger)) = &mut graphics_debugger {
+            debugger.update(nes);
+        }
+        if game_window.version != nes.display.version {
+            std::mem::swap(&mut game_window.frame, &mut nes.display.frame);
+            game_window.version = nes.display.version;
+        }
+
+        // drop mutex guard to nes to let audio runner generate samples
+        drop(guard);
+
+        // draw new game and debugger content
+        if let Some((_id, debugger, _)) = &mut cpu_debugger {
+            debugger.draw();
+        }
+        if let Some((_id, debugger)) = &mut ppu_debugger {
+            debugger.draw();
+        }
+        if let Some((_id, debugger)) = &mut apu_debugger {
+            debugger.draw();
+        }
+        if let Some((_id, debugger)) = &mut memory_debugger {
+            debugger.draw();
+        }
+        if let Some((_id, debugger)) = &mut graphics_debugger {
+            debugger.draw();
+        }
+        game_window.show();
     }
-
-    // TODO playback might be stuck forever waiting for data on audio_rx
-    drop(playback);
 }
 
-impl Drop for DummyAudio {
-    fn drop(&mut self) {
-        if self.record {
-            match write_wave("audio.wav", self.record_samples.as_slice()) {
-                Ok(_) => println!("Saved samples to audio.wav"),
-                Err(error) => eprintln!("Failed to save samples to audio.wav: {error}"),
-            }
-        }
-    }
-}
+// impl Drop for DummyAudio {
+//     fn drop(&mut self) {
+//         if self.record {
+//             match write_wave("audio.wav", self.record_samples.as_slice()) {
+//                 Ok(_) => println!("Saved samples to audio.wav"),
+//                 Err(error) => eprintln!("Failed to save samples to audio.wav: {error}"),
+//             }
+//         }
+//     }
+// }
 
 fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
     let file = std::fs::File::create(path)?;
@@ -782,4 +694,81 @@ fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
         writer.write(&s.to_le_bytes())?;
     }
     Ok(())
+}
+
+struct AudioRunner {
+    emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>,
+    version: u32,
+}
+impl AudioCallback for AudioRunner {
+    type Channel = u16;
+    fn callback(&mut self, buffer: &mut [Self::Channel]) {
+        let mut guard = loop {
+            if let Ok(guard) = self.emulator.try_lock() {
+                break guard;
+            }
+        };
+
+        match &mut *guard {
+            (state, nes, Some(cpu_state)) if state.running => {
+                let mut cpu_state = cpu_state
+                    .lock()
+                    .expect("cpu state should not be locked when nes is not locked");
+                'loops: {
+                    for _ in 0..2590 {
+                        nes.run_one_cpu_tick();
+                        cpu_state.update_instructions(nes);
+
+                        if cpu_state.breakpoints.contains(&nes.cpu.program_counter) {
+                            while !nes.cpu.finished_instruction() {
+                                nes.run_one_cpu_tick();
+                                cpu_state.update_instructions(nes);
+                            }
+                            state.running = false;
+                            nes.apu.clear_samples();
+                            buffer.iter_mut().for_each(|byte| *byte = 0);
+                            break 'loops;
+                        }
+                    }
+                    while nes.audio.version == self.version {
+                        nes.run_one_cpu_tick();
+                        cpu_state.update_instructions(nes);
+
+                        if cpu_state.breakpoints.contains(&nes.cpu.program_counter) {
+                            while !nes.cpu.finished_instruction() {
+                                nes.run_one_cpu_tick();
+                                cpu_state.update_instructions(nes);
+                            }
+                            state.running = false;
+                            nes.apu.clear_samples();
+                            buffer.iter_mut().for_each(|byte| *byte = 0);
+                            break 'loops;
+                        }
+                    }
+                };
+                self.version = nes.audio.version;
+                buffer
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, byte)| *byte = nes.audio.samples[i]);
+            }
+            (state, nes, None) if state.running => {
+                for _ in 0..2590 {
+                    nes.run_one_cpu_tick();
+                }
+                while nes.audio.version == self.version {
+                    nes.run_one_cpu_tick();
+                }
+                self.version = nes.audio.version;
+                buffer
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, byte)| *byte = nes.audio.samples[i]);
+            }
+            (_state, nes, _) => {
+                nes.apu.clear_samples();
+                buffer.iter_mut().for_each(|byte| *byte = 0);
+            }
+        }
+    }
 }

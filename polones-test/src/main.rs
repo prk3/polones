@@ -8,11 +8,6 @@ use std::cell::RefCell;
 use std::path::Component;
 use std::rc::Rc;
 
-struct Discard;
-impl Audio for Discard {
-    fn play(&mut self, _samples: &[u16; 64]) {}
-}
-
 struct SdlDisplay {
     texture: Option<Texture<'static>>,
     _texture_creator: Option<Box<TextureCreator<WindowContext>>>,

@@ -1,12 +1,13 @@
 use crate::text_area::{Color, Color::*, TextArea};
 use crate::EmulatorState;
+use polones_core::cpu::StatusRegister;
 use polones_core::nes::Nes;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
-use std::borrow::Borrow;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug)]
 enum DisassemblyValue {
@@ -146,18 +147,64 @@ pub struct SdlCpuDebugger {
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
+    /// Whether debugger is in breakpoint mode (editing breakpoints).
     breakpoint_mode: bool,
+    /// Where in CPU bus addressing space the breakpoint cursor is atm.
     breakpoint_address: u16,
+    /// Offset of the breakpoint cursor from the program counter (in lines).
     breakpoint_pos: i8,
+    /// Whether nmi breakpoint is set (set before draw call).
+    nmi_breakpoint_set: bool,
+    /// Holds a chunk of self.shared_cpu_state.disassembly just for drawing
+    /// instructions in the CPU debugger window.
+    disassembly_to_draw: [DisassemblyValue; 100],
+    /// Where in CPU bus address space the disassembly_to_draw starts.
+    disassembly_to_draw_start: u16,
+    /// Copy of breakpoints, used for rendering the debugger. Updated only
+    /// when breakpoints are added/removed (happens only on UI thread).
+    breakpoints_to_draw: Vec<u16>,
+    /// Whether breakpoint mode should be enabled in the update function.
+    requested_breakpoint_mode: bool,
+    /// Whether breakpoint should be added under program counter in the update
+    /// function.
+    requested_breakpoint: bool,
+    /// Whether nmi breakpoint should be toggled in the update function.
+    requested_nmi_breakpoint: bool,
+    /// How the breakpoint cursor should change in the update function.
+    requested_move: i8,
+    /// CPU state updated on every SdlCpuDebugger::update call. Becomes stale
+    /// when emulation in running.
+    cpu_state: CpuState,
+    /// Shared CPU state updated on every CPU step. Should only be locked when
+    /// &[mut] Nes is in scope.
+    shared_cpu_state: Arc<Mutex<SharedCpuState>>,
+}
+
+#[derive(Default)]
+pub struct CpuState {
+    cpu_accumulator: u8,
+    cpu_x_index: u8,
+    cpu_y_index: u8,
+    cpu_stack_pointer: u8,
+    cpu_program_counter: u16,
+    cpu_status_register: StatusRegister,
+}
+
+pub struct SharedCpuState {
     pub breakpoints: Vec<u16>,
-    nmi_breakpoint: u16,
     disassembly: [DisassemblyValue; 1 << 16],
 }
 
-impl SdlCpuDebugger {
-    pub const WIDTH: u32 = 256;
-    pub const HEIGHT: u32 = 240;
+impl Default for SharedCpuState {
+    fn default() -> Self {
+        Self {
+            breakpoints: Vec::new(),
+            disassembly: [DisassemblyValue::Unknown; 1 << 16],
+        }
+    }
+}
 
+impl SharedCpuState {
     #[rustfmt::skip]
     const DISASSEMBLY_TABLE: [(Operation, AddressingMode); 256] = {
         use Operation::*;
@@ -182,164 +229,7 @@ impl SdlCpuDebugger {
         ]
     };
 
-    pub fn new(canvas: sdl2::render::WindowCanvas) -> Self {
-        let mut canvas = canvas;
-        canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
-        let texture_creator = Rc::new(canvas.texture_creator());
-        let mut texture = texture_creator
-            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
-            .unwrap();
-        texture
-            .with_lock(None, |data, _pitch| {
-                for byte in data {
-                    *byte = 0;
-                }
-            })
-            .unwrap();
-        canvas.clear();
-        canvas.present();
-
-        let breakpoints = std::fs::read_to_string("./breakpoints")
-            .map(deserialize_breakpoints)
-            .unwrap_or_default();
-
-        Self {
-            canvas,
-            texture: unsafe { std::mem::transmute(texture) },
-            _texture_creator: texture_creator,
-            breakpoint_mode: false,
-            breakpoint_address: 0,
-            breakpoint_pos: 0,
-            breakpoints,
-            nmi_breakpoint: 0,
-            text_area: TextArea::new(),
-            disassembly: [DisassemblyValue::Unknown; 1 << 16],
-        }
-    }
-
-    fn write_instruction_from_disassembly(
-        &mut self,
-        address: u16,
-        line: u8,
-        col: u8,
-        color: Color,
-    ) {
-        use std::io::Write;
-        use std::str;
-
-        let (operation, mode) = self.disassembly[address as usize].unwrap_opcode();
-        let ta = &mut self.text_area;
-
-        match (
-            self.breakpoint_mode,
-            self.breakpoint_address == address,
-            self.breakpoints.contains(&address),
-        ) {
-            (true, true, true) => {
-                ta.write_char_with_color('B', line, col, Yellow);
-            }
-            (true, true, false) => {
-                ta.write_char_with_color('*', line, col, Yellow);
-            }
-            (_, _, true) => {
-                ta.write_char_with_color('B', line, col, Red);
-            }
-            _ => {}
-        }
-
-        let mut operation_str_buffer = [0u8; 3];
-        write!(&mut operation_str_buffer[..], "{:?}", operation).unwrap();
-
-        ta.write_u16_with_color(address, line, col + 2, color);
-        ta.write_str_with_color(
-            str::from_utf8(&operation_str_buffer[..]).unwrap(),
-            line,
-            col + 7,
-            operation.color(),
-        );
-
-        // todo handle the case when next byte overflows address
-        match mode {
-            AddressingMode::Accumulator => {
-                ta.write_char_with_color('A', line, col + 11, Red);
-            }
-            AddressingMode::Absolute => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
-            }
-            AddressingMode::AbsoluteXIndexed => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
-                ta.write_str_with_color(",X", line, col + 16, Red);
-            }
-            AddressingMode::AbsoluteYIndexed => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
-                ta.write_str_with_color(",Y", line, col + 16, Red);
-            }
-            AddressingMode::Immediate => {
-                let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('#', line, col + 11, Red);
-                ta.write_char_with_color('$', line, col + 12, Yellow);
-                ta.write_u8_with_color(byte, line, col + 13, White);
-            }
-            AddressingMode::Implied => {}
-            AddressingMode::Indirect => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                let high = self.disassembly[(address + 2) as usize].unwrap_value();
-                ta.write_char_with_color('(', line, col + 11, Red);
-                ta.write_char_with_color('$', line, col + 12, Yellow);
-                ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 13, White);
-                ta.write_char_with_color(')', line, col + 17, Red);
-            }
-            AddressingMode::XIndexedIndirect => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('(', line, col + 11, Red);
-                ta.write_char_with_color('$', line, col + 12, Yellow);
-                ta.write_u8_with_color(low, line, col + 13, White);
-                ta.write_str_with_color(",X)", line, col + 15, Red);
-            }
-            AddressingMode::IndirectYIndexed => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('(', line, col + 11, Red);
-                ta.write_char_with_color('$', line, col + 12, Yellow);
-                ta.write_u8_with_color(low, line, col + 13, White);
-                ta.write_str_with_color("),Y", line, col + 15, Red);
-            }
-            AddressingMode::Relative => {
-                // TODO has the same syntax as zeropage, maybe indicate which one is it?
-                let byte = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u8_with_color(byte, line, col + 12, White);
-            }
-            AddressingMode::Zeropage => {
-                // TODO has the same syntax as relative, maybe indicate which one is it?
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u8_with_color(low, line, col + 12, White);
-            }
-            AddressingMode::ZeropageXIndexed => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u8_with_color(low, line, col + 12, White);
-                ta.write_str_with_color(",X", line, col + 14, Red);
-            }
-            AddressingMode::ZeropageYIndexed => {
-                let low = self.disassembly[(address + 1) as usize].unwrap_value();
-                ta.write_char_with_color('$', line, col + 11, Yellow);
-                ta.write_u8_with_color(low, line, col + 12, White);
-                ta.write_str_with_color(",Y", line, col + 14, Red);
-            }
-        }
-    }
-
-    fn fill_instructions(&mut self, nes: &mut Nes) {
+    pub fn update_instructions(&mut self, nes: &mut Nes) {
         let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let mut position = cpu.program_counter;
 
@@ -391,9 +281,69 @@ impl SdlCpuDebugger {
             }
         }
     }
+}
 
-    pub fn handle_event(&mut self, event: Event, nes: &mut Nes, state: &mut EmulatorState) {
-        if self.breakpoint_mode {
+impl SdlCpuDebugger {
+    pub const WIDTH: u32 = 256;
+    pub const HEIGHT: u32 = 240;
+
+    pub fn new(
+        canvas: sdl2::render::WindowCanvas,
+        shared_cpu_state: Arc<Mutex<SharedCpuState>>,
+    ) -> Self {
+        let mut canvas = canvas;
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
+        let texture_creator = Rc::new(canvas.texture_creator());
+        let mut texture = texture_creator
+            .create_texture_streaming(canvas.default_pixel_format(), Self::WIDTH, Self::HEIGHT)
+            .unwrap();
+        texture
+            .with_lock(None, |data, _pitch| {
+                for byte in data {
+                    *byte = 0;
+                }
+            })
+            .unwrap();
+        canvas.clear();
+        canvas.present();
+
+        let breakpoints = std::fs::read_to_string("./breakpoints")
+            .map(deserialize_breakpoints)
+            .unwrap_or_default();
+
+        {
+            let mut scs = shared_cpu_state
+                .try_lock()
+                .expect("cpu state should not be locked when nes is not locked");
+
+            scs.breakpoints = breakpoints.clone();
+        }
+
+        Self {
+            canvas,
+            texture: unsafe { std::mem::transmute(texture) },
+            _texture_creator: texture_creator,
+            text_area: TextArea::new(),
+            breakpoint_mode: false,
+            breakpoint_address: 0,
+            breakpoint_pos: 0,
+            nmi_breakpoint_set: false,
+            disassembly_to_draw: [DisassemblyValue::Unknown; 100],
+            disassembly_to_draw_start: 0,
+            breakpoints_to_draw: breakpoints,
+            requested_breakpoint_mode: false,
+            requested_breakpoint: false,
+            requested_nmi_breakpoint: false,
+            requested_move: 0,
+            cpu_state: CpuState::default(),
+            shared_cpu_state,
+        }
+    }
+
+    pub fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
+        // Emulation is running. We can't read CPU state as self.cpu_state is
+        // stale and self.shared_state is possibly changing right now.
+        if state.running {
             match event {
                 Event::Quit { .. } => {
                     state.exit = true;
@@ -402,67 +352,21 @@ impl SdlCpuDebugger {
                     keycode: _k @ Some(Keycode::Escape),
                     ..
                 } => {
-                    self.breakpoint_mode = false;
+                    state.exit = true;
                 }
                 Event::KeyDown {
-                    keycode: _k @ Some(Keycode::B),
+                    keycode: _k @ Some(Keycode::Space),
                     ..
                 } => {
-                    if self.breakpoints.contains(&self.breakpoint_address) {
-                        self.breakpoints.retain(|a| *a != self.breakpoint_address);
-                    } else {
-                        self.breakpoints.push(self.breakpoint_address);
-                    }
-                    // TODO add game name to the breakpoints file name
-                    let _ = std::fs::write(
-                        "./breakpoints".to_string(),
-                        serialize_breakpoints(&self.breakpoints),
-                    );
-                    self.breakpoint_mode = false;
-                }
-                Event::KeyDown {
-                    keycode: _k @ Some(Keycode::Down),
-                    ..
-                } => {
-                    let mut address = self.breakpoint_address;
-                    if self.breakpoint_pos < 15 {
-                        for _ in 0..3 {
-                            address += 1;
-                            match self.disassembly[address as usize] {
-                                DisassemblyValue::Opcode(..) => {
-                                    self.breakpoint_address = address;
-                                    self.breakpoint_pos += 1;
-                                    break;
-                                }
-                                DisassemblyValue::Value(..) => continue,
-                                DisassemblyValue::Unknown => break,
-                            }
-                        }
-                    }
-                }
-                Event::KeyDown {
-                    keycode: _k @ Some(Keycode::Up),
-                    ..
-                } => {
-                    let mut address = self.breakpoint_address;
-                    if self.breakpoint_pos > -14 {
-                        for _ in 0..3 {
-                            address -= 1;
-                            match self.disassembly[address as usize] {
-                                DisassemblyValue::Opcode(..) => {
-                                    self.breakpoint_address = address;
-                                    self.breakpoint_pos -= 1;
-                                    break;
-                                }
-                                DisassemblyValue::Value(..) => continue,
-                                DisassemblyValue::Unknown => break,
-                            }
-                        }
-                    }
+                    state.running = false;
                 }
                 _ => {}
             }
-        } else {
+        }
+        // Emulation is not running and we are not in breakpoint mode. We can
+        // read self.cpu_state since it (probably) has not changing since last
+        // self.update call.
+        else if !self.breakpoint_mode {
             match event {
                 Event::Quit { .. } => {
                     state.exit = true;
@@ -472,30 +376,28 @@ impl SdlCpuDebugger {
                     ..
                 } => {
                     state.exit = true;
+                }
+                Event::KeyDown {
+                    keycode: _k @ Some(Keycode::Space),
+                    ..
+                } => {
+                    state.running = true;
                 }
                 Event::KeyDown {
                     keycode: _k @ Some(Keycode::N),
                     ..
                 } => {
-                    if self.breakpoints.contains(&self.nmi_breakpoint) {
-                        self.breakpoints.retain(|b| *b != self.nmi_breakpoint);
-                    } else {
-                        self.breakpoints.push(self.nmi_breakpoint);
-                    }
+                    // We can't lock shared state here, so let's request nmi
+                    // breakpoint toggle.
+                    self.requested_nmi_breakpoint = true;
                 }
                 Event::KeyDown {
                     keycode: _k @ Some(Keycode::B),
                     ..
                 } => {
-                    let pc = nes.cpu.borrow().program_counter;
-                    match self.disassembly[pc as usize] {
-                        DisassemblyValue::Opcode(..) => {
-                            self.breakpoint_address = pc;
-                            self.breakpoint_pos = 0;
-                            self.breakpoint_mode = true;
-                        }
-                        _ => {}
-                    }
+                    // We can't lock shared state here, so let's request
+                    // breakpoint mode toggle.
+                    self.requested_breakpoint_mode = true;
                 }
                 Event::KeyDown {
                     keycode: _k @ Some(Keycode::Return),
@@ -503,11 +405,54 @@ impl SdlCpuDebugger {
                 } => {
                     state.one_step = true;
                 }
+                _ => {}
+            }
+        }
+        // Emulation is not running and we are in breakpoint mode. We can read
+        // self.cpu_state since it (probably) has not changing since last
+        // self.update call.
+        else {
+            match event {
+                Event::Quit { .. } => {
+                    state.exit = true;
+                }
                 Event::KeyDown {
-                    keycode: _k @ Some(Keycode::Space),
+                    keycode: _k @ Some(Keycode::Escape),
                     ..
                 } => {
-                    state.running = !state.running;
+                    self.breakpoint_mode = false;
+                }
+                Event::KeyDown {
+                    keycode: _k @ Some(Keycode::N),
+                    ..
+                } => {
+                    // We can't lock shared state here, so we request nmi
+                    // breakpoint toggle.
+                    self.requested_nmi_breakpoint = true;
+                }
+                Event::KeyDown {
+                    keycode: _k @ Some(Keycode::B),
+                    ..
+                } => {
+                    // We can't lock shared state here, so we request
+                    // breakpoint toggle.
+                    self.requested_breakpoint = true;
+                }
+                Event::KeyDown {
+                    keycode: _k @ Some(Keycode::Down),
+                    ..
+                } => {
+                    // We can't lock shared state here, so we request moving
+                    // pointer down.
+                    self.requested_move = 1;
+                }
+                Event::KeyDown {
+                    keycode: _k @ Some(Keycode::Up),
+                    ..
+                } => {
+                    // We can't lock shared state here, so we request moving
+                    // pointer down.
+                    self.requested_move = -1;
                 }
                 _ => {}
             }
@@ -515,84 +460,216 @@ impl SdlCpuDebugger {
     }
 
     pub fn update(&mut self, nes: &mut Nes) {
-        self.fill_instructions(nes);
+        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+        let mut scs = self
+            .shared_cpu_state
+            .try_lock()
+            .expect("cpu state should not be locked when nes is not locked");
+
+        self.cpu_state.cpu_accumulator = cpu.accumulator;
+        self.cpu_state.cpu_x_index = cpu.x_index;
+        self.cpu_state.cpu_y_index = cpu.y_index;
+        self.cpu_state.cpu_stack_pointer = cpu.stack_pointer;
+        self.cpu_state.cpu_status_register = cpu.status_register;
+        self.cpu_state.cpu_program_counter = cpu.program_counter;
+
+        if self.requested_breakpoint_mode {
+            let pc = self.cpu_state.cpu_program_counter;
+            match scs.disassembly[pc as usize] {
+                DisassemblyValue::Opcode(..) => {
+                    self.breakpoint_address = pc;
+                    self.breakpoint_pos = 0;
+                    self.breakpoint_mode = true;
+                }
+                _ => {
+                    eprintln!("Could not set a breakpoint: PC is not pointing at an instruction")
+                }
+            }
+        }
+
+        let low = cpu_bus.read(0xFFFA);
+        let high = cpu_bus.read(0xFFFB);
+        let nmi = ((high as u16) << 8) | low as u16;
+
+        if self.requested_nmi_breakpoint {
+            if scs.breakpoints.contains(&nmi) {
+                scs.breakpoints.retain(|b| *b != nmi);
+            } else {
+                scs.breakpoints.push(nmi);
+            }
+            self.breakpoints_to_draw = scs.breakpoints.clone();
+        }
+
+        self.nmi_breakpoint_set = scs.breakpoints.contains(&nmi);
+
+        if self.requested_breakpoint {
+            let pc = self.breakpoint_address;
+            if scs.breakpoints.contains(&pc) {
+                scs.breakpoints.retain(|b| *b != pc);
+            } else {
+                scs.breakpoints.push(pc);
+            }
+            self.breakpoint_mode = false;
+            self.breakpoints_to_draw = scs.breakpoints.clone();
+            // TODO add game name to the breakpoints file name
+            let _ = std::fs::write(
+                "./breakpoints".to_string(),
+                serialize_breakpoints(&scs.breakpoints),
+            );
+        }
+
+        while self.requested_move > 0 {
+            let mut address = self.breakpoint_address;
+            if self.breakpoint_pos < 15 {
+                for _ in 0..3 {
+                    address += 1;
+                    match scs.disassembly[address as usize] {
+                        DisassemblyValue::Opcode(..) => {
+                            self.breakpoint_address = address;
+                            self.breakpoint_pos += 1;
+                            break;
+                        }
+                        DisassemblyValue::Value(..) => continue,
+                        DisassemblyValue::Unknown => break,
+                    }
+                }
+            }
+            self.requested_move -= 1;
+        }
+        while self.requested_move < 0 {
+            let mut address = self.breakpoint_address;
+            if self.breakpoint_pos > -14 {
+                for _ in 0..3 {
+                    address -= 1;
+                    match scs.disassembly[address as usize] {
+                        DisassemblyValue::Opcode(..) => {
+                            self.breakpoint_address = address;
+                            self.breakpoint_pos -= 1;
+                            break;
+                        }
+                        DisassemblyValue::Value(..) => continue,
+                        DisassemblyValue::Unknown => break,
+                    }
+                }
+            }
+            self.requested_move += 1;
+        }
+
+        self.disassembly_to_draw_start = match self.cpu_state.cpu_program_counter {
+            0..=49 => 0,
+            65487..=65535 => 65436,
+            other => other - 50,
+        };
+        for i in 0..100 {
+            self.disassembly_to_draw[i] =
+                scs.disassembly[self.disassembly_to_draw_start as usize + i];
+        }
+
+        self.requested_breakpoint_mode = false;
+        self.requested_breakpoint = false;
+        self.requested_nmi_breakpoint = false;
+        self.requested_move = 0;
     }
 
-    pub fn show(&mut self, nes: &mut Nes) {
-        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
-
+    pub fn draw(&mut self) {
         self.canvas.clear();
         self.text_area.clear();
         let ta = &mut self.text_area;
 
-        {
-            let low = cpu_bus.read(0xFFFA);
-            let high = cpu_bus.read(0xFFFB);
-            self.nmi_breakpoint = ((high as u16) << 8) | low as u16;
-        }
-
         ta.write_str_with_color("A", 0, 1, Yellow);
-        ta.write_u8_with_color(cpu.accumulator, 0, 3, White);
+        ta.write_u8_with_color(self.cpu_state.cpu_accumulator, 0, 3, White);
 
         ta.write_str_with_color("X", 1, 1, Yellow);
-        ta.write_u8_with_color(cpu.x_index, 1, 3, White);
+        ta.write_u8_with_color(self.cpu_state.cpu_x_index, 1, 3, White);
 
         ta.write_str_with_color("Y", 2, 1, Yellow);
-        ta.write_u8_with_color(cpu.y_index, 2, 3, White);
+        ta.write_u8_with_color(self.cpu_state.cpu_y_index, 2, 3, White);
 
         ta.write_str_with_color("SP", 3, 0, Yellow);
-        ta.write_u8_with_color(cpu.stack_pointer, 3, 3, White);
+        ta.write_u8_with_color(self.cpu_state.cpu_stack_pointer, 3, 3, White);
 
         ta.write_str_with_color("PC", 4, 0, Yellow);
-        ta.write_u16_with_color(cpu.program_counter, 4, 3, White);
+        ta.write_u16_with_color(self.cpu_state.cpu_program_counter, 4, 3, White);
 
         ta.write_str_with_color("SR", 5, 0, Yellow);
 
         ta.write_str_with_color("N", 6, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_negative(), 6, 3, White);
+        ta.write_bool_with_color(
+            self.cpu_state.cpu_status_register.get_negative(),
+            6,
+            3,
+            White,
+        );
 
         ta.write_str_with_color("V", 7, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_overflow(), 7, 3, White);
+        ta.write_bool_with_color(
+            self.cpu_state.cpu_status_register.get_overflow(),
+            7,
+            3,
+            White,
+        );
 
         ta.write_str_with_color("-", 8, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_ignored(), 8, 3, White);
+        ta.write_bool_with_color(
+            self.cpu_state.cpu_status_register.get_ignored(),
+            8,
+            3,
+            White,
+        );
 
         ta.write_str_with_color("B", 9, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_break(), 9, 3, White);
+        ta.write_bool_with_color(self.cpu_state.cpu_status_register.get_break(), 9, 3, White);
 
         ta.write_str_with_color("D", 10, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_decimal(), 10, 3, White);
+        ta.write_bool_with_color(
+            self.cpu_state.cpu_status_register.get_decimal(),
+            10,
+            3,
+            White,
+        );
 
         ta.write_str_with_color("I", 11, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_interrupt(), 11, 3, White);
+        ta.write_bool_with_color(
+            self.cpu_state.cpu_status_register.get_interrupt(),
+            11,
+            3,
+            White,
+        );
 
         ta.write_str_with_color("Z", 12, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_zero(), 12, 3, White);
+        ta.write_bool_with_color(self.cpu_state.cpu_status_register.get_zero(), 12, 3, White);
 
         ta.write_str_with_color("C", 13, 1, Yellow);
-        ta.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, White);
+        ta.write_bool_with_color(self.cpu_state.cpu_status_register.get_carry(), 13, 3, White);
 
         if self.breakpoint_mode {
             ta.write_char_with_color('B', 28, 0, Red);
         }
 
-        if self.breakpoints.contains(&self.nmi_breakpoint) {
+        if self.nmi_breakpoint_set {
             ta.write_str_with_color("NMI", 29, 0, Red);
         }
 
-        let mut address = cpu.program_counter;
+        let mut address_abs = self.cpu_state.cpu_program_counter;
+        let mut address_rel = self.cpu_state.cpu_program_counter - self.disassembly_to_draw_start;
         let mut color = Red;
         let mut line = 14;
 
         loop {
-            match self.disassembly[address as usize] {
+            match self.disassembly_to_draw[address_rel as usize] {
                 DisassemblyValue::Opcode(..) => {
-                    let effective_color = if address == cpu.program_counter {
+                    let effective_color = if address_abs == self.cpu_state.cpu_program_counter {
                         Yellow
                     } else {
                         color
                     };
-                    self.write_instruction_from_disassembly(address, line, 11, effective_color);
+                    self.write_instruction_from_disassembly(
+                        address_abs,
+                        address_rel,
+                        line,
+                        11,
+                        effective_color,
+                    );
                     color = White;
                     if line == 0 {
                         break;
@@ -600,33 +677,44 @@ impl SdlCpuDebugger {
                     line -= 1;
                 }
                 DisassemblyValue::Value(..) => {}
-                DisassemblyValue::Unknown => {
-                    break;
-                }
+                DisassemblyValue::Unknown => break,
             }
-            if address == 0 {
+            if address_rel == 0 {
                 break;
             }
-            address -= 1;
+            address_rel -= 1;
+            address_abs -= 1;
         }
 
-        if cpu.program_counter < u16::MAX {
+        if self.cpu_state.cpu_program_counter < u16::MAX {
             let mut line = 15;
+            let mut address_abs = self.cpu_state.cpu_program_counter + 1;
+            let mut address_rel =
+                self.cpu_state.cpu_program_counter + 1 - self.disassembly_to_draw_start;
 
-            for address in (cpu.program_counter + 1)..=u16::MAX {
-                match self.disassembly[address as usize] {
+            loop {
+                match self.disassembly_to_draw[address_rel as usize] {
                     DisassemblyValue::Opcode(..) => {
-                        self.write_instruction_from_disassembly(address, line, 11, White);
-                        if line == 31 {
+                        self.write_instruction_from_disassembly(
+                            address_abs,
+                            address_rel,
+                            line,
+                            11,
+                            White,
+                        );
+                        if line == 30 {
                             break;
                         }
                         line += 1;
                     }
                     DisassemblyValue::Value(..) => {}
-                    DisassemblyValue::Unknown => {
-                        break;
-                    }
+                    DisassemblyValue::Unknown => break,
                 }
+                if address_rel == 99 {
+                    break;
+                }
+                address_rel += 1;
+                address_abs += 1;
             }
         }
 
@@ -649,6 +737,150 @@ impl SdlCpuDebugger {
             )
             .unwrap();
         self.canvas.present();
+    }
+
+    fn write_instruction_from_disassembly(
+        &mut self,
+        address_abs: u16,
+        address_rel: u16,
+        line: u8,
+        col: u8,
+        color: Color,
+    ) {
+        use std::io::Write;
+        use std::str;
+
+        let ta = &mut self.text_area;
+        let (operation, mode) = self.disassembly_to_draw[address_rel as usize].unwrap_opcode();
+
+        match (
+            self.breakpoint_mode,
+            self.breakpoint_address == address_abs,
+            self.breakpoints_to_draw.contains(&address_abs),
+        ) {
+            (true, true, true) => {
+                ta.write_char_with_color('B', line, col, Yellow);
+            }
+            (true, true, false) => {
+                ta.write_char_with_color('*', line, col, Yellow);
+            }
+            (_, _, true) => {
+                ta.write_char_with_color('B', line, col, Red);
+            }
+            _ => {}
+        }
+
+        let mut operation_str_buffer = [0u8; 3];
+        write!(&mut operation_str_buffer[..], "{:?}", operation).unwrap();
+
+        ta.write_u16_with_color(address_abs, line, col + 2, color);
+        ta.write_str_with_color(
+            str::from_utf8(&operation_str_buffer[..]).unwrap(),
+            line,
+            col + 7,
+            operation.color(),
+        );
+
+        match mode {
+            AddressingMode::Accumulator => {
+                ta.write_char_with_color('A', line, col + 11, Red);
+            }
+            AddressingMode::Absolute => {
+                if address_rel < 100 - 2 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    let high = self.disassembly_to_draw[(address_rel + 2) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
+                }
+            }
+            AddressingMode::AbsoluteXIndexed => {
+                if address_rel < 100 - 2 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    let high = self.disassembly_to_draw[(address_rel + 2) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
+                    ta.write_str_with_color(",X", line, col + 16, Red);
+                }
+            }
+            AddressingMode::AbsoluteYIndexed => {
+                if address_rel < 100 - 2 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    let high = self.disassembly_to_draw[(address_rel + 2) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 12, White);
+                    ta.write_str_with_color(",Y", line, col + 16, Red);
+                }
+            }
+            AddressingMode::Immediate => {
+                if address_rel < 100 - 1 {
+                    let byte = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('#', line, col + 11, Red);
+                    ta.write_char_with_color('$', line, col + 12, Yellow);
+                    ta.write_u8_with_color(byte, line, col + 13, White);
+                }
+            }
+            AddressingMode::Implied => {}
+            AddressingMode::Indirect => {
+                if address_rel < 100 - 2 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    let high = self.disassembly_to_draw[(address_rel + 2) as usize].unwrap_value();
+                    ta.write_char_with_color('(', line, col + 11, Red);
+                    ta.write_char_with_color('$', line, col + 12, Yellow);
+                    ta.write_u16_with_color((high as u16) << 8 | low as u16, line, col + 13, White);
+                    ta.write_char_with_color(')', line, col + 17, Red);
+                }
+            }
+            AddressingMode::XIndexedIndirect => {
+                if address_rel < 100 - 1 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('(', line, col + 11, Red);
+                    ta.write_char_with_color('$', line, col + 12, Yellow);
+                    ta.write_u8_with_color(low, line, col + 13, White);
+                    ta.write_str_with_color(",X)", line, col + 15, Red);
+                }
+            }
+            AddressingMode::IndirectYIndexed => {
+                if address_rel < 100 - 1 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('(', line, col + 11, Red);
+                    ta.write_char_with_color('$', line, col + 12, Yellow);
+                    ta.write_u8_with_color(low, line, col + 13, White);
+                    ta.write_str_with_color("),Y", line, col + 15, Red);
+                }
+            }
+            AddressingMode::Relative => {
+                // TODO has the same syntax as zeropage, maybe indicate which one is it?
+                if address_rel < 100 - 1 {
+                    let byte = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u8_with_color(byte, line, col + 12, White);
+                }
+            }
+            AddressingMode::Zeropage => {
+                // TODO has the same syntax as relative, maybe indicate which one is it?
+                if address_rel < 100 - 1 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u8_with_color(low, line, col + 12, White);
+                }
+            }
+            AddressingMode::ZeropageXIndexed => {
+                if address_rel < 100 - 1 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u8_with_color(low, line, col + 12, White);
+                    ta.write_str_with_color(",X", line, col + 14, Red);
+                }
+            }
+            AddressingMode::ZeropageYIndexed => {
+                if address_rel < 100 - 1 {
+                    let low = self.disassembly_to_draw[(address_rel + 1) as usize].unwrap_value();
+                    ta.write_char_with_color('$', line, col + 11, Yellow);
+                    ta.write_u8_with_color(low, line, col + 12, White);
+                    ta.write_str_with_color(",Y", line, col + 14, Red);
+                }
+            }
+        }
     }
 }
 
@@ -674,7 +906,7 @@ fn deserialize_breakpoints(string: String) -> Vec<u16> {
 fn disassebly_table_has_unique_elements() {
     let mut set = std::collections::BTreeSet::<(Operation, AddressingMode)>::new();
 
-    for entry in SdlCpuDebugger::DISASSEMBLY_TABLE.iter() {
+    for entry in SharedCpuState::DISASSEMBLY_TABLE.iter() {
         if set.contains(entry) && entry != &(Operation::XXX, AddressingMode::Implied) {
             panic!("{:?} {:?} repeats", entry.0, entry.1);
         }

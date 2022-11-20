@@ -1,19 +1,29 @@
+use crate::apu::Apu;
 use crate::cpu::Cpu;
 use crate::game_file::GameFile;
 use crate::io::Io;
 use crate::mapper::{mapper_from_game_file, Mapper};
 use crate::ppu::Ppu;
 use crate::ram::Ram;
-use crate::apu::Apu;
 
 pub type Frame = [[(u8, u8, u8); 256]; 240];
+pub type Samples = [u16; 64];
 
-/// Abstraction over main display device.
-pub trait Display {
-    /// Draws a frame to the screen.
-    fn draw(&mut self, frame: Box<Frame>);
+pub struct Display {
+    pub frame: Box<Frame>,
+    pub version: u32,
 }
 
+impl Display {
+    fn new() -> Self {
+        Self {
+            frame: Box::new([[(0, 0, 0); 256]; 240]),
+            version: 0,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum PortState {
     Unplugged,
     Gamepad {
@@ -28,16 +38,34 @@ pub enum PortState {
     },
 }
 
-/// Abstraction over input sources (pads).
-pub trait Input {
-    fn read_port_1(&mut self) -> PortState;
-    fn read_port_2(&mut self) -> PortState;
+pub struct Input {
+    pub port_1: PortState,
+    pub port_2: PortState,
+    pub version: u32,
 }
 
-/// Abstraction over audio interface.
-pub trait Audio {
-    /// Plays audio passed as a parameter.
-    fn play(&mut self, samples: &[u16; 64]);
+impl Input {
+    fn new() -> Self {
+        Self {
+            port_1: PortState::Unplugged,
+            port_2: PortState::Unplugged,
+            version: 0,
+        }
+    }
+}
+
+pub struct Audio {
+    pub samples: Box<Samples>,
+    pub version: u32,
+}
+
+impl Audio {
+    fn new() -> Self {
+        Self {
+            samples: Box::new([0; 64]),
+            version: 0,
+        }
+    }
 }
 
 /// Structure representing the entire console.
@@ -47,10 +75,13 @@ pub struct Nes {
     pub apu: Apu,
     pub io: Io,
     pub ppu: Ppu,
-    pub mapper: Box<dyn Mapper>,
+    pub mapper: Box<dyn Mapper + Send + 'static>,
     pub cpu_ram: Ram<{ 2 * 1024 }>,
     pub ppu_nametable_ram: Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: Ram<32>,
+    pub display: Display,
+    pub input: Input,
+    pub audio: Audio,
 }
 
 pub struct OamDma {
@@ -77,32 +108,20 @@ impl OamDma {
 }
 
 impl Nes {
-    pub fn new<D: Display + 'static, I: Input + 'static, A: Audio + 'static>(
-        game: GameFile,
-        display: D,
-        input: I,
-        audio: A,
-    ) -> Result<Self, &'static str> {
-        let mapper = mapper_from_game_file(game)?;
-        let cpu = Cpu::new();
-        let cpu_ram = Ram::new();
-        let oam_dma = OamDma::new();
-        let ppu = Ppu::new(Box::new(display));
-        let ppu_nametable_ram = Ram::new();
-        let ppu_palette_ram = Ram::new();
-        let apu = Apu::new(Box::new(audio));
-        let io = Io::new(Box::new(input));
-
+    pub fn new(game: GameFile) -> Result<Self, &'static str> {
         let mut nes = Self {
-            mapper,
-            cpu,
-            cpu_ram,
-            oam_dma,
-            ppu,
-            ppu_nametable_ram,
-            ppu_palette_ram,
-            apu,
-            io,
+            mapper: mapper_from_game_file(game)?,
+            cpu: Cpu::new(),
+            cpu_ram: Ram::new(),
+            oam_dma: OamDma::new(),
+            ppu: Ppu::new(),
+            ppu_nametable_ram: Ram::new(),
+            ppu_palette_ram: Ram::new(),
+            apu: Apu::new(),
+            io: Io::new(),
+            display: Display::new(),
+            input: Input::new(),
+            audio: Audio::new(),
         };
 
         let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
@@ -112,15 +131,33 @@ impl Nes {
     }
 
     pub fn run_one_cpu_tick(&mut self) {
-        let (mut cpu, mut cpu_bus) = self.split_into_cpu_and_bus();
+        let Nes {
+            mapper,
+            cpu,
+            cpu_ram,
+            oam_dma,
+            ppu,
+            ppu_nametable_ram,
+            ppu_palette_ram,
+            apu,
+            io,
+            display,
+            input,
+            audio,
+        } = self;
+
+        let mut peripherals = Peripherals { display, input, audio };
+        let mut cpu_bus = CpuBus { oam_dma, apu, io, ppu, mapper, cpu_ram, ppu_nametable_ram, ppu_palette_ram };
+
         cpu.tick(&mut cpu_bus);
         cpu_bus.oam_dma.tick(cpu);
-        cpu_bus.apu.tick(cpu);
+        cpu_bus.io.tick(cpu, &mut peripherals);
+        cpu_bus.apu.tick(cpu, &mut peripherals);
 
-        let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
-        ppu.tick(&mut cpu, &mut ppu_bus);
-        ppu.tick(&mut cpu, &mut ppu_bus);
-        ppu.tick(&mut cpu, &mut ppu_bus);
+        let mut ppu_bus = PpuBus { mapper, ppu_nametable_ram, ppu_palette_ram };
+        ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
+        ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
+        ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
     }
 
     pub fn run_one_cpu_instruction(&mut self) {
@@ -167,7 +204,7 @@ pub struct CpuBus<'a> {
     pub apu: &'a mut Apu,
     pub io: &'a mut Io,
     pub ppu: &'a mut Ppu,
-    pub mapper: &'a mut Box<dyn Mapper>,
+    pub mapper: &'a mut Box<dyn Mapper + Send + 'static>,
     pub cpu_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_nametable_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: &'a mut Ram<32>,
@@ -237,7 +274,7 @@ impl<'a> CpuBus<'a> {
 }
 
 pub struct PpuBus<'a> {
-    pub mapper: &'a mut Box<dyn Mapper>,
+    pub mapper: &'a mut Box<dyn Mapper + Send + 'static>,
     pub ppu_nametable_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: &'a mut Ram<32>,
 }
@@ -259,11 +296,11 @@ impl<'a> PpuBus<'a> {
             _a @ 0x3F00..=0x3FFF => {
                 if address & 0b11 == 0 {
                     self.ppu_palette_ram
-                        .write(address as usize & 0b11101111, value);
+                        .write(address as usize & 0b11101111, value & 0b00111111);
                     self.ppu_palette_ram
-                        .write(address as usize | 0b00010000, value);
+                        .write(address as usize | 0b00010000, value & 0b00111111);
                 } else {
-                    self.ppu_palette_ram.write(address as usize, value);
+                    self.ppu_palette_ram.write(address as usize, value & 0b00111111);
                 }
             }
             _a if self.mapper.ppu_address_mapped(address) => self.mapper.ppu_write(address, value),
@@ -274,4 +311,10 @@ impl<'a> PpuBus<'a> {
             _ => unreachable!(),
         }
     }
+}
+
+pub struct Peripherals<'a> {
+    pub display: &'a mut Display,
+    pub input: &'a mut Input,
+    pub audio: &'a mut Audio,
 }

@@ -1,5 +1,5 @@
 use crate::cpu::Cpu;
-use crate::nes::Audio;
+use crate::nes::{Peripherals, Samples};
 
 const PULSE_LENGTH_COUNTER_TABLE: [u8; 32] = [
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
@@ -187,11 +187,11 @@ pub struct Apu {
 
     pulse1_samples: Vec<u8>,
     pulse2_samples: Vec<u8>,
-    audio: Box<dyn Audio>,
+    output_samples: Box<Samples>,
 }
 
 impl Apu {
-    pub fn new(audio: Box<dyn Audio>) -> Self {
+    pub fn new() -> Self {
         Self {
             pulse1: Pulse {
                 enabled: false,
@@ -269,7 +269,7 @@ impl Apu {
 
             pulse1_samples: Vec::with_capacity(2900),
             pulse2_samples: Vec::with_capacity(2900),
-            audio,
+            output_samples: Box::new([0; 64]),
         }
     }
 
@@ -385,7 +385,7 @@ impl Apu {
         }
     }
 
-    pub fn tick(&mut self, cpu: &mut Cpu) {
+    pub fn tick(&mut self, cpu: &mut Cpu, peripherals: &mut Peripherals) {
         if self.frame_counter_mode {
             // 5 step
             match self.frame_counter {
@@ -501,7 +501,7 @@ impl Apu {
             .push(!self.pulse2.muted() as u8 * self.pulse2.volume());
 
         if self.pulse1_samples.len() == (64.0f64 * (1_789_773.0 / 44_100.0)).round() as usize {
-            let mut output_samples = [0u16; 64];
+
             for i in 0..64 {
                 let pulse_index = (i as f64 * (1_789_773.0 / 44_100.0)).round() as usize;
                 let pulse1_sample = self.pulse1_samples[pulse_index];
@@ -509,16 +509,23 @@ impl Apu {
                 let triangle_sample = 0;
                 let noise_sample = 0;
                 let dmc_sample = 0;
-                output_samples[i] = PULSE_MIX_TABLE[(pulse1_sample + pulse2_sample) as usize]
+                self.output_samples[i] = PULSE_MIX_TABLE[(pulse1_sample + pulse2_sample) as usize]
                     + OTHER_MIX_TABLE[3 * triangle_sample as usize
                         + 2 * noise_sample as usize
                         + dmc_sample as usize];
             }
             self.pulse1_samples.clear();
             self.pulse2_samples.clear();
-            self.audio.play(&output_samples);
+            std::mem::swap(&mut peripherals.audio.samples, &mut self.output_samples);
+            peripherals.audio.version = peripherals.audio.version.wrapping_add(1);
         }
 
         self.cpu_cycle_odd = !self.cpu_cycle_odd;
+    }
+
+    // Removes all generated samples.
+    pub fn clear_samples(&mut self) {
+        self.pulse1_samples.clear();
+        self.pulse2_samples.clear();
     }
 }

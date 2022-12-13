@@ -23,25 +23,56 @@ impl Display {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub enum PortState {
+    #[default]
     Unplugged,
-    Gamepad {
-        a: bool,
-        b: bool,
-        select: bool,
-        start: bool,
-        up: bool,
-        down: bool,
-        left: bool,
-        right: bool,
-    },
+    Gamepad(GamepadState),
 }
 
+#[derive(Default, Clone)]
+pub struct GamepadState {
+    pub a: bool,
+    pub b: bool,
+    pub select: bool,
+    pub start: bool,
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl GamepadState {
+    pub fn to_byte(&self) -> u8 {
+        (self.a as u8) << 7
+            | (self.b as u8) << 6
+            | (self.select as u8) << 5
+            | (self.start as u8) << 4
+            | (self.up as u8) << 3
+            | (self.down as u8) << 2
+            | (self.left as u8) << 1
+            | (self.right as u8) << 0
+    }
+    pub fn from_byte(byte: u8) -> Self {
+        Self {
+            a: byte & 0b10000000 > 0,
+            b: byte & 0b01000000 > 0,
+            select: byte & 0b00100000 > 0,
+            start: byte & 0b00010000 > 0,
+            up: byte & 0b00001000 > 0,
+            down: byte & 0b00000100 > 0,
+            left: byte & 0b00000010 > 0,
+            right: byte & 0b00000001 > 0,
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct Input {
     pub port_1: PortState,
     pub port_2: PortState,
-    pub version: u32,
+    /// Integer updated every time ports are read.
+    pub read_version: u32,
 }
 
 impl Input {
@@ -49,7 +80,7 @@ impl Input {
         Self {
             port_1: PortState::Unplugged,
             port_2: PortState::Unplugged,
-            version: 0,
+            read_version: 0,
         }
     }
 }
@@ -146,15 +177,32 @@ impl Nes {
             audio,
         } = self;
 
-        let mut peripherals = Peripherals { display, input, audio };
-        let mut cpu_bus = CpuBus { oam_dma, apu, io, ppu, mapper, cpu_ram, ppu_nametable_ram, ppu_palette_ram };
+        let mut peripherals = Peripherals {
+            display,
+            input,
+            audio,
+        };
+        let mut cpu_bus = CpuBus {
+            oam_dma,
+            apu,
+            io,
+            ppu,
+            mapper,
+            cpu_ram,
+            ppu_nametable_ram,
+            ppu_palette_ram,
+        };
 
         cpu.tick(&mut cpu_bus);
         cpu_bus.oam_dma.tick(cpu);
         cpu_bus.io.tick(cpu, &mut peripherals);
         cpu_bus.apu.tick(cpu, &mut peripherals);
 
-        let mut ppu_bus = PpuBus { mapper, ppu_nametable_ram, ppu_palette_ram };
+        let mut ppu_bus = PpuBus {
+            mapper,
+            ppu_nametable_ram,
+            ppu_palette_ram,
+        };
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
@@ -300,7 +348,8 @@ impl<'a> PpuBus<'a> {
                     self.ppu_palette_ram
                         .write(address as usize | 0b00010000, value & 0b00111111);
                 } else {
-                    self.ppu_palette_ram.write(address as usize, value & 0b00111111);
+                    self.ppu_palette_ram
+                        .write(address as usize, value & 0b00111111);
                 }
             }
             _a if self.mapper.ppu_address_mapped(address) => self.mapper.ppu_write(address, value),

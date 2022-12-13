@@ -1,6 +1,6 @@
 use crate::text_area::{Color::*, TextArea};
 use crate::EmulatorState;
-use polones_core::apu::Pulse;
+use polones_core::apu::{Pulse, Triangle};
 use polones_core::nes::Nes;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -17,35 +17,18 @@ pub struct SdlApuDebugger {
     apu_state: ApuState,
 }
 
-#[derive(Default)]
 struct ApuState {
-    pulse_enabled: bool,
-    pulse_envelope_divider_period: u8,
-    pulse_envelope_divider_counter: u8,
-    pulse_envelope_start_flag: bool,
-    pulse_envelope_decay_level_counter: u8,
-    pulse_sweep_enabled: bool,
-    pulse_envelope_constant_volume_flag: bool,
+    pulse: Pulse,
+    triangle: Triangle,
+}
 
-    pulse_sweep_divider_period: u8,
-    pulse_sweep_divider_counter: u8,
-    pulse_sweep_negate_flag: bool,
-    pulse_sweep_shift_count: u8,
-    pulse_sweep_reload_flag: bool,
-
-    pulse_timer_divider_period: u16,
-    pulse_timer_divider_counter: u16,
-
-    pulse_sequencer_duty: u8,
-    pulse_sequencer_step: u8,
-
-    pulse_length_counter: u8,
-    pulse_length_counter_halt: bool,
-
-    pulse_volume: u8,
-    pulse_sweep_mutes_channel: bool,
-    pulse_sequencer_mutes_channel: bool,
-    pulse_length_counter_mutes_channel: bool,
+impl Default for ApuState {
+    fn default() -> Self {
+        Self {
+            pulse: Pulse::new_with_complement(),
+            triangle: Triangle::default(),
+        }
+    }
 }
 
 impl SdlApuDebugger {
@@ -117,42 +100,15 @@ impl SdlApuDebugger {
     }
 
     pub fn update(&mut self, nes: &Nes) {
-        fn update_pulse_data(apu_state: &mut ApuState, pulse: &Pulse) {
-            apu_state.pulse_enabled = pulse.enabled;
-            apu_state.pulse_envelope_divider_period = pulse.envelope_divider_period;
-            apu_state.pulse_envelope_divider_counter = pulse.envelope_divider_counter;
-            apu_state.pulse_envelope_start_flag = pulse.envelope_start_flag;
-            apu_state.pulse_envelope_decay_level_counter = pulse.envelope_decay_level_counter;
-            apu_state.pulse_sweep_enabled = pulse.sweep_enabled;
-            apu_state.pulse_envelope_constant_volume_flag = pulse.envelope_constant_volume_flag;
-
-            apu_state.pulse_sweep_divider_period = pulse.sweep_divider_period;
-            apu_state.pulse_sweep_divider_counter = pulse.sweep_divider_counter;
-            apu_state.pulse_sweep_negate_flag = pulse.sweep_negate_flag;
-            apu_state.pulse_sweep_shift_count = pulse.sweep_shift_count;
-            apu_state.pulse_sweep_reload_flag = pulse.sweep_reload_flag;
-
-            apu_state.pulse_timer_divider_period = pulse.timer_divider_period;
-            apu_state.pulse_timer_divider_counter = pulse.timer_divider_counter;
-
-            apu_state.pulse_sequencer_duty = pulse.sequencer_duty;
-            apu_state.pulse_sequencer_step = pulse.sequencer_step;
-
-            apu_state.pulse_length_counter = pulse.length_counter;
-            apu_state.pulse_length_counter_halt = pulse.length_counter_halt;
-
-            apu_state.pulse_volume = pulse.volume();
-            apu_state.pulse_sweep_mutes_channel = pulse.sweep_mutes_channel();
-            apu_state.pulse_sequencer_mutes_channel = pulse.sequencer_mutes_channel();
-            apu_state.pulse_length_counter_mutes_channel = pulse.length_counter_mutes_channel();
-        }
-
         match self.mode {
             1 => {
-                update_pulse_data(&mut self.apu_state, &nes.apu.pulse1);
+                self.apu_state.pulse = nes.apu.pulse1.clone();
             }
             2 => {
-                update_pulse_data(&mut self.apu_state, &nes.apu.pulse2);
+                self.apu_state.pulse = nes.apu.pulse2.clone();
+            }
+            3 => {
+                self.apu_state.triangle = nes.apu.triangle.clone();
             }
             _ => {}
         }
@@ -163,72 +119,109 @@ impl SdlApuDebugger {
         self.text_area.clear();
         let ta = &mut self.text_area;
 
-        fn draw_pulse_data<const W: usize, const H: usize>(
-            apu_state: &ApuState,
-            ta: &mut TextArea<W, H>,
-        ) {
+        fn draw_pulse_data<const W: usize, const H: usize>(pulse: &Pulse, ta: &mut TextArea<W, H>) {
             ta.write_str_with_color("ENABLED", 1, 0, Red);
-            ta.write_bool_with_color(apu_state.pulse_enabled, 1, 29, White);
+            ta.write_bool_with_color(pulse.enabled, 1, 29, White);
+
             ta.write_str_with_color("EN DIVIDER PERIOD", 2, 0, Blue);
-            ta.write_u8_with_color(apu_state.pulse_envelope_divider_period, 2, 28, White);
+            ta.write_u8_with_color(pulse.envelope_divider_period, 2, 28, White);
             ta.write_str_with_color("EN DIVIDER COUNTER", 3, 0, Blue);
-            ta.write_u8_with_color(apu_state.pulse_envelope_divider_counter, 3, 28, White);
+            ta.write_u8_with_color(pulse.envelope_divider_counter, 3, 28, White);
             ta.write_str_with_color("EN START FLAG", 4, 0, Blue);
-            ta.write_bool_with_color(apu_state.pulse_envelope_start_flag, 4, 29, White);
+            ta.write_bool_with_color(pulse.envelope_start_flag, 4, 29, White);
             ta.write_str_with_color("EN DECAY LEVEL COUNTER", 5, 0, Blue);
-            ta.write_u8_with_color(apu_state.pulse_envelope_decay_level_counter, 5, 28, White);
+            ta.write_u8_with_color(pulse.envelope_decay_level_counter, 5, 28, White);
             ta.write_str_with_color("EN LOOP FLAG", 6, 0, Blue);
-            ta.write_bool_with_color(apu_state.pulse_sweep_enabled, 6, 29, White);
+            ta.write_bool_with_color(pulse.sweep_enabled, 6, 29, White);
             ta.write_str_with_color("EN CONSTANT VOLUME FLAG", 7, 0, Blue);
-            ta.write_bool_with_color(apu_state.pulse_envelope_constant_volume_flag, 7, 29, White);
+            ta.write_bool_with_color(pulse.envelope_constant_volume_flag, 7, 29, White);
 
             ta.write_str_with_color("SW ENABLED", 8, 0, Green);
-            ta.write_bool_with_color(apu_state.pulse_sweep_enabled, 8, 29, White);
+            ta.write_bool_with_color(pulse.sweep_enabled, 8, 29, White);
             ta.write_str_with_color("SW DIVIDER PERIOD", 9, 0, Green);
-            ta.write_u8_with_color(apu_state.pulse_sweep_divider_period, 9, 28, White);
+            ta.write_u8_with_color(pulse.sweep_divider_period, 9, 28, White);
             ta.write_str_with_color("SW DIVIDER COUNTER", 10, 0, Green);
-            ta.write_u8_with_color(apu_state.pulse_sweep_divider_counter, 10, 28, White);
+            ta.write_u8_with_color(pulse.sweep_divider_counter, 10, 28, White);
             ta.write_str_with_color("SW NEGATE FLAG", 11, 0, Green);
-            ta.write_bool_with_color(apu_state.pulse_sweep_negate_flag, 11, 29, White);
+            ta.write_bool_with_color(pulse.sweep_negate_flag, 11, 29, White);
             ta.write_str_with_color("SW SHIFT COUNT", 12, 0, Green);
-            ta.write_u8_with_color(apu_state.pulse_sweep_shift_count, 12, 28, White);
+            ta.write_u8_with_color(pulse.sweep_shift_count, 12, 28, White);
             ta.write_str_with_color("SW RELOAD FLAG", 13, 0, Green);
-            ta.write_bool_with_color(apu_state.pulse_sweep_reload_flag, 13, 29, White);
+            ta.write_bool_with_color(pulse.sweep_reload_flag, 13, 29, White);
 
             ta.write_str_with_color("TI DIVIDER PERIOD", 14, 0, Yellow);
-            ta.write_u16_with_color(apu_state.pulse_timer_divider_period, 14, 26, White);
+            ta.write_u16_with_color(pulse.timer_divider_period, 14, 26, White);
             ta.write_str_with_color("TI DIVIDER COUNTER", 15, 0, Yellow);
-            ta.write_u16_with_color(apu_state.pulse_timer_divider_counter, 15, 26, White);
+            ta.write_u16_with_color(pulse.timer_divider_counter, 15, 26, White);
 
             ta.write_str_with_color("SEQUENCER DUTY", 16, 0, Magenta);
-            ta.write_u8_with_color(apu_state.pulse_sequencer_duty, 16, 28, White);
+            ta.write_u8_with_color(pulse.sequencer_duty, 16, 28, White);
             ta.write_str_with_color("SEQUENCER STEP", 17, 0, Magenta);
-            ta.write_u8_with_color(apu_state.pulse_sequencer_step, 17, 28, White);
+            ta.write_u8_with_color(pulse.sequencer_step, 17, 28, White);
 
             ta.write_str_with_color("LENGTH COUNTER", 18, 0, Cyan);
-            ta.write_u8_with_color(apu_state.pulse_length_counter, 18, 28, White);
+            ta.write_u8_with_color(pulse.length_counter, 18, 28, White);
             ta.write_str_with_color("LENGTH COUNTER HALT", 19, 0, Cyan);
-            ta.write_bool_with_color(apu_state.pulse_length_counter_halt, 19, 29, White);
+            ta.write_bool_with_color(pulse.length_counter_halt, 19, 29, White);
 
-            ta.write_str_with_color("EN", 21, 5, Blue);
-            ta.write_str_with_color("SW", 21, 10, Green);
-            ta.write_str_with_color("SE", 21, 25, Magenta);
-            ta.write_str_with_color("LC", 21, 20, Cyan);
+            ta.write_str_with_color("EN", 21, 0, Blue);
+            ta.write_str_with_color("SW", 21, 5, Green);
+            ta.write_str_with_color("SE", 21, 10, Magenta);
+            ta.write_str_with_color("LC", 21, 15, Cyan);
 
-            ta.write_u8_with_color(apu_state.pulse_volume, 22, 5, White);
-            ta.write_bool_with_color(!apu_state.pulse_sweep_mutes_channel, 22, 11, White);
-            ta.write_bool_with_color(!apu_state.pulse_sequencer_mutes_channel, 22, 16, White);
-            ta.write_bool_with_color(!apu_state.pulse_length_counter_mutes_channel, 22, 21, White);
+            ta.write_u8_with_color(pulse.volume(), 22, 0, White);
+            ta.write_bool_with_color(!pulse.sweep_mutes_channel(), 22, 6, White);
+            ta.write_bool_with_color(!pulse.sequencer_mutes_channel(), 22, 11, White);
+            ta.write_bool_with_color(!pulse.length_counter_mutes_channel(), 22, 16, White);
+        }
+
+        fn draw_triangle_data<const W: usize, const H: usize>(triangle: &Triangle, ta: &mut TextArea<W, H>) {
+            ta.write_str_with_color("ENABLED", 1, 0, Red);
+            ta.write_bool_with_color(triangle.enabled, 1, 29, White);
+
+            ta.write_str_with_color("TIMER", 2, 0, Blue);
+            ta.write_u16_with_color(triangle.timer, 2, 26, White);
+            ta.write_str_with_color("TIMER LOAD", 3, 0, Blue);
+            ta.write_u16_with_color(triangle.timer_load, 3, 26, White);
+
+            ta.write_str_with_color("LIN COUNTER ", 4, 0, Green);
+            ta.write_u8_with_color(triangle.linear_counter, 4, 28, White);
+            ta.write_str_with_color("LIN COUNTER LOAD", 5, 0, Green);
+            ta.write_u8_with_color(triangle.linear_counter_load, 5, 28, White);
+            ta.write_str_with_color("LIN COUNTER RELOAD", 6, 0, Green);
+            ta.write_bool_with_color(triangle.linear_counter_reload, 6, 29, White);
+
+            ta.write_str_with_color("LEN COUNTER", 7, 0, Yellow);
+            ta.write_u8_with_color(triangle.length_counter, 7, 28, White);
+            ta.write_str_with_color("LEN COUNTER LOAD", 8, 0, Yellow);
+            ta.write_u8_with_color(triangle.length_counter_load, 8, 28, White);
+            ta.write_str_with_color("LEN COUNTER HALT", 9, 0, Yellow);
+            ta.write_bool_with_color(triangle.length_counter_halt, 9, 29, White);
+
+            ta.write_str_with_color("SEQUENCER STEP", 10, 0, Magenta);
+            ta.write_u8_with_color(triangle.sequencer_step, 10, 28, White);
+
+            ta.write_str_with_color("LI", 12, 0, Green);
+            ta.write_str_with_color("LE", 12, 5, Yellow);
+            ta.write_str_with_color("SE", 12, 10, Magenta);
+
+            ta.write_bool_with_color(triangle.linear_counter != 0, 13, 1, White);
+            ta.write_bool_with_color(triangle.length_counter != 0, 13, 6, White);
+            ta.write_u8_with_color(triangle.volume(), 13, 10, White);
         }
 
         match self.mode {
             1 => {
                 ta.write_str_with_color("PULSE 1", 0, 0, Yellow);
-                draw_pulse_data(&self.apu_state, ta);
+                draw_pulse_data(&self.apu_state.pulse, ta);
             }
             2 => {
                 ta.write_str_with_color("PULSE 2", 0, 0, Yellow);
-                draw_pulse_data(&self.apu_state, ta);
+                draw_pulse_data(&self.apu_state.pulse, ta);
+            }
+            3 => {
+                ta.write_str_with_color("TRIANGLE", 0, 0, Yellow);
+                draw_triangle_data(&self.apu_state.triangle, ta);
             }
             _ => {}
         }

@@ -4,7 +4,7 @@ use cpu_debugger::{SdlCpuDebugger, SharedCpuState};
 use graphics_debugger::SdlGraphicsDebugger;
 use memory_debugger::SdlMemoryDebugger;
 use polones_core::game_file::GameFile;
-use polones_core::nes::{Frame, Nes, PortState};
+use polones_core::nes::{Frame, GamepadState, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use sdl2::event::Event;
@@ -14,6 +14,7 @@ use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
 use std::io::Write;
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 mod apu_debugger;
@@ -27,22 +28,8 @@ struct SdlGameWindow {
     canvas: sdl2::render::WindowCanvas,
     _texture_creator: sdl2::render::TextureCreator<WindowContext>,
     texture: sdl2::render::Texture<'static>,
-    gamepad_1_up: bool,
-    gamepad_1_down: bool,
-    gamepad_1_left: bool,
-    gamepad_1_right: bool,
-    gamepad_1_select: bool,
-    gamepad_1_start: bool,
-    gamepad_1_a: bool,
-    gamepad_1_b: bool,
-    gamepad_2_up: bool,
-    gamepad_2_down: bool,
-    gamepad_2_left: bool,
-    gamepad_2_right: bool,
-    gamepad_2_select: bool,
-    gamepad_2_start: bool,
-    gamepad_2_a: bool,
-    gamepad_2_b: bool,
+    gamepad_1: GamepadState,
+    gamepad_2: GamepadState,
     frame: Box<Frame>,
     version: u32,
 }
@@ -72,22 +59,8 @@ impl SdlGameWindow {
             canvas,
             texture: unsafe { std::mem::transmute(texture) },
             _texture_creator: texture_creator,
-            gamepad_1_up: false,
-            gamepad_1_down: false,
-            gamepad_1_left: false,
-            gamepad_1_right: false,
-            gamepad_1_select: false,
-            gamepad_1_start: false,
-            gamepad_1_a: false,
-            gamepad_1_b: false,
-            gamepad_2_up: false,
-            gamepad_2_down: false,
-            gamepad_2_left: false,
-            gamepad_2_right: false,
-            gamepad_2_select: false,
-            gamepad_2_start: false,
-            gamepad_2_a: false,
-            gamepad_2_b: false,
+            gamepad_1: GamepadState::default(),
+            gamepad_2: GamepadState::default(),
             frame: Box::new([[(0, 0, 0); 256]; 240]),
             version: 0,
         }
@@ -108,97 +81,97 @@ impl SdlGameWindow {
                 keycode: _k @ Some(Keycode::W),
                 ..
             } => {
-                self.gamepad_1_up = true;
+                self.gamepad_1.up = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::S),
                 ..
             } => {
-                self.gamepad_1_down = true;
+                self.gamepad_1.down = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::A),
                 ..
             } => {
-                self.gamepad_1_left = true;
+                self.gamepad_1.left = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::D),
                 ..
             } => {
-                self.gamepad_1_right = true;
+                self.gamepad_1.right = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::R),
                 ..
             } => {
-                self.gamepad_1_select = true;
+                self.gamepad_1.select = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::T),
                 ..
             } => {
-                self.gamepad_1_start = true;
+                self.gamepad_1.start = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::F),
                 ..
             } => {
-                self.gamepad_1_b = true;
+                self.gamepad_1.b = true;
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::G),
                 ..
             } => {
-                self.gamepad_1_a = true;
+                self.gamepad_1.a = true;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::W),
                 ..
             } => {
-                self.gamepad_1_up = false;
+                self.gamepad_1.up = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::S),
                 ..
             } => {
-                self.gamepad_1_down = false;
+                self.gamepad_1.down = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::A),
                 ..
             } => {
-                self.gamepad_1_left = false;
+                self.gamepad_1.left = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::D),
                 ..
             } => {
-                self.gamepad_1_right = false;
+                self.gamepad_1.right = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::R),
                 ..
             } => {
-                self.gamepad_1_select = false;
+                self.gamepad_1.select = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::T),
                 ..
             } => {
-                self.gamepad_1_start = false;
+                self.gamepad_1.start = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::F),
                 ..
             } => {
-                self.gamepad_1_b = false;
+                self.gamepad_1.b = false;
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::G),
                 ..
             } => {
-                self.gamepad_1_a = false;
+                self.gamepad_1.a = false;
             }
             _ => {}
         }
@@ -260,17 +233,6 @@ impl SdlGameWindow {
     }
 }
 
-// writer
-//                 .write(&[(inner.gamepad_1_a as u8) << 7
-//                     | (inner.gamepad_1_b as u8) << 6
-//                     | (inner.gamepad_1_select as u8) << 5
-//                     | (inner.gamepad_1_start as u8) << 4
-//                     | (inner.gamepad_1_up as u8) << 3
-//                     | (inner.gamepad_1_down as u8) << 2
-//                     | (inner.gamepad_1_left as u8) << 1
-//                     | (inner.gamepad_1_right as u8)])
-//                 .expect("Could not write input from port 1");
-
 #[derive(Clone)]
 pub struct EmulatorState {
     running: bool,
@@ -300,6 +262,9 @@ struct Args {
 
     #[arg(long)]
     record_inputs_file: Option<String>,
+
+    #[arg(long)]
+    record_audio_file: Option<String>,
 }
 
 fn main() {
@@ -458,6 +423,10 @@ fn main() {
     let mut game_window = SdlGameWindow::new(game_canvas);
     let mut nes = Nes::new(game_file).expect("Could not start the game");
 
+    // On every write to $4016 we push port 1 and port 2 state to this vec.
+    let mut inputs: Vec<u8> = Vec::new();
+    let mut inputs_version = 0;
+
     let mut state = EmulatorState {
         running: true,
         exit: false,
@@ -495,10 +464,9 @@ fn main() {
 
     let audio = audio_subsystem
         .open_playback(
-            audio_subsystem
-                .audio_playback_device_name(0)
-                .ok()
-                .as_deref() as Option<&str>,
+            audio_subsystem.audio_playback_device_name(1)
+                .unwrap()
+                .deref(),
             &AudioSpecDesired {
                 freq: Some(44100),
                 channels: Some(1),
@@ -507,6 +475,8 @@ fn main() {
             |_| AudioRunner {
                 emulator: emulator.clone(),
                 version: 0,
+                record_audio_file: args.record_audio_file,
+                samples: Vec::new(),
             },
         )
         .unwrap();
@@ -569,28 +539,17 @@ fn main() {
         let mut guard = emulator.lock().unwrap();
         let (audio_state, nes, _) = &mut *guard;
 
+        if args.record_inputs_file.is_some() {
+            while inputs_version != nes.input.read_version {
+                inputs.push(game_window.gamepad_1.to_byte());
+                inputs.push(game_window.gamepad_2.to_byte());
+                inputs_version = inputs_version.wrapping_add(1);
+            }
+        }
+
         // update nes controls
-        nes.input.port_1 = PortState::Gamepad {
-            a: game_window.gamepad_1_a,
-            b: game_window.gamepad_1_b,
-            select: game_window.gamepad_1_select,
-            start: game_window.gamepad_1_start,
-            up: game_window.gamepad_1_up,
-            down: game_window.gamepad_1_down,
-            left: game_window.gamepad_1_left,
-            right: game_window.gamepad_1_right,
-        };
-        nes.input.port_2 = PortState::Gamepad {
-            a: game_window.gamepad_2_a,
-            b: game_window.gamepad_2_b,
-            select: game_window.gamepad_2_select,
-            start: game_window.gamepad_2_start,
-            up: game_window.gamepad_2_up,
-            down: game_window.gamepad_2_down,
-            left: game_window.gamepad_2_left,
-            right: game_window.gamepad_2_right,
-        };
-        nes.input.version = nes.input.version.wrapping_add(1);
+        nes.input.port_1 = PortState::Gamepad(game_window.gamepad_1.clone());
+        nes.input.port_2 = PortState::Gamepad(game_window.gamepad_2.clone());
 
         // handle one instruction step request
         if state.one_step {
@@ -659,47 +618,22 @@ fn main() {
         }
         game_window.show();
     }
-}
 
-// impl Drop for DummyAudio {
-//     fn drop(&mut self) {
-//         if self.record {
-//             match write_wave("audio.wav", self.record_samples.as_slice()) {
-//                 Ok(_) => println!("Saved samples to audio.wav"),
-//                 Err(error) => eprintln!("Failed to save samples to audio.wav: {error}"),
-//             }
-//         }
-//     }
-// }
-
-fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
-
-    writer.write(b"RIFF")?;
-    writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
-    writer.write(b"WAVE")?;
-    writer.write(b"fmt ")?;
-    writer.write(&16u32.to_le_bytes())?;
-    writer.write(&1u16.to_le_bytes())?;
-    writer.write(&1u16.to_le_bytes())?;
-    writer.write(&44_100u32.to_le_bytes())?;
-    writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
-    writer.write(&(2u16).to_le_bytes())?;
-    writer.write(&(16u16).to_le_bytes())?;
-    writer.write(b"data")?;
-    writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
-
-    for s in samples.iter() {
-        writer.write(&s.to_le_bytes())?;
+    if let Some(inputs_file) = args.record_inputs_file {
+        std::fs::write(inputs_file, inputs).unwrap_or_else(|e| {
+            eprintln!("Could not save inputs: {e}");
+            std::process::exit(1);
+        })
     }
-    Ok(())
 }
 
 struct AudioRunner {
     emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>,
     version: u32,
+    record_audio_file: Option<String>,
+    samples: Vec<u16>,
 }
+
 impl AudioCallback for AudioRunner {
     type Channel = u16;
     fn callback(&mut self, buffer: &mut [Self::Channel]) {
@@ -727,6 +661,9 @@ impl AudioCallback for AudioRunner {
                             state.running = false;
                             nes.apu.clear_samples();
                             buffer.iter_mut().for_each(|byte| *byte = 0);
+                            if self.record_audio_file.is_some() {
+                                self.samples.extend_from_slice(&[0; 64]);
+                            }
                             break 'loops;
                         }
                     }
@@ -742,6 +679,9 @@ impl AudioCallback for AudioRunner {
                             state.running = false;
                             nes.apu.clear_samples();
                             buffer.iter_mut().for_each(|byte| *byte = 0);
+                            if self.record_audio_file.is_some() {
+                                self.samples.extend_from_slice(&[0; 64]);
+                            }
                             break 'loops;
                         }
                     }
@@ -751,6 +691,9 @@ impl AudioCallback for AudioRunner {
                     .iter_mut()
                     .enumerate()
                     .for_each(|(i, byte)| *byte = nes.audio.samples[i]);
+                if self.record_audio_file.is_some() {
+                    self.samples.extend_from_slice(&nes.audio.samples[..]);
+                }
             }
             (state, nes, None) if state.running => {
                 for _ in 0..2590 {
@@ -764,11 +707,49 @@ impl AudioCallback for AudioRunner {
                     .iter_mut()
                     .enumerate()
                     .for_each(|(i, byte)| *byte = nes.audio.samples[i]);
+                if self.record_audio_file.is_some() {
+                    self.samples.extend_from_slice(&nes.audio.samples[..]);
+                }
             }
             (_state, nes, _) => {
                 nes.apu.clear_samples();
                 buffer.iter_mut().for_each(|byte| *byte = 0);
+                if self.record_audio_file.is_some() {
+                    self.samples.extend_from_slice(&[0; 64]);
+                }
             }
         }
     }
+}
+
+impl Drop for AudioRunner {
+    fn drop(&mut self) {
+        if let Some(path) = &self.record_audio_file {
+            write_wave(path, &self.samples).unwrap();
+        }
+    }
+}
+
+fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+
+    writer.write(b"RIFF")?;
+    writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
+    writer.write(b"WAVE")?;
+    writer.write(b"fmt ")?;
+    writer.write(&16u32.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&44_100u32.to_le_bytes())?;
+    writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
+    writer.write(&(2u16).to_le_bytes())?;
+    writer.write(&(16u16).to_le_bytes())?;
+    writer.write(b"data")?;
+    writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
+
+    for s in samples.iter() {
+        writer.write(&s.to_le_bytes())?;
+    }
+    Ok(())
 }

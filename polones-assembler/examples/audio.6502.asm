@@ -57,12 +57,21 @@ reset
     LDA #$40
     STA $4017
 
-    LDA #%10111111
-    STA $4000
-    LDA #%00000011
-    STA $4002
-    LDA #%00000010
-    STA $4003
+    ; triangle wave
+    LDA #$FF
+    STA $4008
+    LDA #$38
+    STA $400A
+    LDA #%11111000
+    STA $400B
+
+    ; pulse wave
+    ; LDA #%10111111
+    ; STA $4000
+    ; LDA #%00000011
+    ; STA $4002
+    ; LDA #%00000010
+    ; STA $4003
 
     @sleep_forever
     JMP @sleep_forever

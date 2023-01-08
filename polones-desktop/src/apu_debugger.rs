@@ -120,54 +120,53 @@ impl SdlApuDebugger {
         let ta = &mut self.text_area;
 
         fn draw_pulse_data<const W: usize, const H: usize>(pulse: &Pulse, ta: &mut TextArea<W, H>) {
-            ta.write_str_with_color("ENABLED", 1, 0, Red);
-            ta.write_bool_with_color(pulse.enabled, 1, 29, White);
+            ta.write_str_with_color("EN DIVIDER PERIOD", 1, 0, Blue);
+            ta.write_u8_with_color(pulse.envelope_divider_period, 1, 28, White);
+            ta.write_str_with_color("EN DIVIDER COUNTER", 2, 0, Blue);
+            ta.write_u8_with_color(pulse.envelope_divider_counter, 2, 28, White);
+            ta.write_str_with_color("EN START FLAG", 3, 0, Blue);
+            ta.write_bool_with_color(pulse.envelope_start_flag, 3, 29, White);
+            ta.write_str_with_color("EN DECAY LEVEL COUNTER", 4, 0, Blue);
+            ta.write_u8_with_color(pulse.envelope_decay_level_counter, 4, 28, White);
+            ta.write_str_with_color("EN LOOP FLAG", 5, 0, Blue);
+            ta.write_bool_with_color(pulse.sweep_enabled, 5, 29, White);
+            ta.write_str_with_color("EN CONSTANT VOLUME FLAG", 6, 0, Blue);
+            ta.write_bool_with_color(pulse.envelope_constant_volume_flag, 6, 29, White);
 
-            ta.write_str_with_color("EN DIVIDER PERIOD", 2, 0, Blue);
-            ta.write_u8_with_color(pulse.envelope_divider_period, 2, 28, White);
-            ta.write_str_with_color("EN DIVIDER COUNTER", 3, 0, Blue);
-            ta.write_u8_with_color(pulse.envelope_divider_counter, 3, 28, White);
-            ta.write_str_with_color("EN START FLAG", 4, 0, Blue);
-            ta.write_bool_with_color(pulse.envelope_start_flag, 4, 29, White);
-            ta.write_str_with_color("EN DECAY LEVEL COUNTER", 5, 0, Blue);
-            ta.write_u8_with_color(pulse.envelope_decay_level_counter, 5, 28, White);
-            ta.write_str_with_color("EN LOOP FLAG", 6, 0, Blue);
-            ta.write_bool_with_color(pulse.sweep_enabled, 6, 29, White);
-            ta.write_str_with_color("EN CONSTANT VOLUME FLAG", 7, 0, Blue);
-            ta.write_bool_with_color(pulse.envelope_constant_volume_flag, 7, 29, White);
+            ta.write_str_with_color("SWEEP ENABLED", 7, 0, Green);
+            ta.write_bool_with_color(pulse.sweep_enabled, 7, 29, White);
+            ta.write_str_with_color("SWEEP DIVIDER PERIOD", 8, 0, Green);
+            ta.write_u8_with_color(pulse.sweep_divider_period, 8, 28, White);
+            ta.write_str_with_color("SWEEP DIVIDER COUNTER", 9, 0, Green);
+            ta.write_u8_with_color(pulse.sweep_divider_counter, 9, 28, White);
+            ta.write_str_with_color("SWEEP NEGATE FLAG", 10, 0, Green);
+            ta.write_bool_with_color(pulse.sweep_negate_flag, 10, 29, White);
+            ta.write_str_with_color("SWEEP SHIFT COUNT", 11, 0, Green);
+            ta.write_u8_with_color(pulse.sweep_shift_count, 11, 28, White);
+            ta.write_str_with_color("SWEEP RELOAD FLAG", 12, 0, Green);
+            ta.write_bool_with_color(pulse.sweep_reload_flag, 12, 29, White);
 
-            ta.write_str_with_color("SW ENABLED", 8, 0, Green);
-            ta.write_bool_with_color(pulse.sweep_enabled, 8, 29, White);
-            ta.write_str_with_color("SW DIVIDER PERIOD", 9, 0, Green);
-            ta.write_u8_with_color(pulse.sweep_divider_period, 9, 28, White);
-            ta.write_str_with_color("SW DIVIDER COUNTER", 10, 0, Green);
-            ta.write_u8_with_color(pulse.sweep_divider_counter, 10, 28, White);
-            ta.write_str_with_color("SW NEGATE FLAG", 11, 0, Green);
-            ta.write_bool_with_color(pulse.sweep_negate_flag, 11, 29, White);
-            ta.write_str_with_color("SW SHIFT COUNT", 12, 0, Green);
-            ta.write_u8_with_color(pulse.sweep_shift_count, 12, 28, White);
-            ta.write_str_with_color("SW RELOAD FLAG", 13, 0, Green);
-            ta.write_bool_with_color(pulse.sweep_reload_flag, 13, 29, White);
+            ta.write_str_with_color("TIMER DIVIDER PERIOD", 13, 0, Yellow);
+            ta.write_u16_with_color(pulse.timer_divider_period, 13, 26, White);
+            ta.write_str_with_color("TIMER DIVIDER COUNTER", 14, 0, Yellow);
+            ta.write_u16_with_color(pulse.timer_divider_counter, 14, 26, White);
 
-            ta.write_str_with_color("TI DIVIDER PERIOD", 14, 0, Yellow);
-            ta.write_u16_with_color(pulse.timer_divider_period, 14, 26, White);
-            ta.write_str_with_color("TI DIVIDER COUNTER", 15, 0, Yellow);
-            ta.write_u16_with_color(pulse.timer_divider_counter, 15, 26, White);
+            ta.write_str_with_color("SEQUENCER DUTY", 15, 0, Magenta);
+            ta.write_u8_with_color(pulse.sequencer_duty, 15, 28, White);
+            ta.write_str_with_color("SEQUENCER STEP", 16, 0, Magenta);
+            ta.write_u8_with_color(pulse.sequencer_step, 16, 28, White);
 
-            ta.write_str_with_color("SEQUENCER DUTY", 16, 0, Magenta);
-            ta.write_u8_with_color(pulse.sequencer_duty, 16, 28, White);
-            ta.write_str_with_color("SEQUENCER STEP", 17, 0, Magenta);
-            ta.write_u8_with_color(pulse.sequencer_step, 17, 28, White);
-
-            ta.write_str_with_color("LENGTH COUNTER", 18, 0, Cyan);
-            ta.write_u8_with_color(pulse.length_counter, 18, 28, White);
-            ta.write_str_with_color("LENGTH COUNTER HALT", 19, 0, Cyan);
-            ta.write_bool_with_color(pulse.length_counter_halt, 19, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER", 17, 0, Cyan);
+            ta.write_u8_with_color(pulse.length_counter, 17, 28, White);
+            ta.write_str_with_color("LENGTH COUNTER HALT", 18, 0, Cyan);
+            ta.write_bool_with_color(pulse.length_counter_halt, 18, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER EN", 19, 0, Cyan);
+            ta.write_bool_with_color(pulse.length_counter_enabled, 19, 29, White);
 
             ta.write_str_with_color("EN", 21, 0, Blue);
             ta.write_str_with_color("SW", 21, 5, Green);
             ta.write_str_with_color("SE", 21, 10, Magenta);
-            ta.write_str_with_color("LC", 21, 15, Cyan);
+            ta.write_str_with_color("LE", 21, 15, Cyan);
 
             ta.write_u8_with_color(pulse.volume(), 22, 0, White);
             ta.write_bool_with_color(!pulse.sweep_mutes_channel(), 22, 6, White);
@@ -175,34 +174,36 @@ impl SdlApuDebugger {
             ta.write_bool_with_color(!pulse.length_counter_mutes_channel(), 22, 16, White);
         }
 
-        fn draw_triangle_data<const W: usize, const H: usize>(triangle: &Triangle, ta: &mut TextArea<W, H>) {
-            ta.write_str_with_color("ENABLED", 1, 0, Red);
-            ta.write_bool_with_color(triangle.enabled, 1, 29, White);
+        fn draw_triangle_data<const W: usize, const H: usize>(
+            triangle: &Triangle,
+            ta: &mut TextArea<W, H>,
+        ) {
+            ta.write_str_with_color("TIMER", 1, 0, Blue);
+            ta.write_u16_with_color(triangle.timer, 1, 26, White);
+            ta.write_str_with_color("TIMER LOAD", 2, 0, Blue);
+            ta.write_u16_with_color(triangle.timer_load, 2, 26, White);
 
-            ta.write_str_with_color("TIMER", 2, 0, Blue);
-            ta.write_u16_with_color(triangle.timer, 2, 26, White);
-            ta.write_str_with_color("TIMER LOAD", 3, 0, Blue);
-            ta.write_u16_with_color(triangle.timer_load, 3, 26, White);
+            ta.write_str_with_color("LINEAR COUNTER", 3, 0, Green);
+            ta.write_u8_with_color(triangle.linear_counter, 3, 28, White);
+            ta.write_str_with_color("LINEAR COUNTER LOAD", 4, 0, Green);
+            ta.write_u8_with_color(triangle.linear_counter_load, 4, 28, White);
+            ta.write_str_with_color("LINEAR COUNTER RELOAD", 5, 0, Green);
+            ta.write_bool_with_color(triangle.linear_counter_reload, 5, 29, White);
 
-            ta.write_str_with_color("LIN COUNTER ", 4, 0, Green);
-            ta.write_u8_with_color(triangle.linear_counter, 4, 28, White);
-            ta.write_str_with_color("LIN COUNTER LOAD", 5, 0, Green);
-            ta.write_u8_with_color(triangle.linear_counter_load, 5, 28, White);
-            ta.write_str_with_color("LIN COUNTER RELOAD", 6, 0, Green);
-            ta.write_bool_with_color(triangle.linear_counter_reload, 6, 29, White);
-
-            ta.write_str_with_color("LEN COUNTER", 7, 0, Yellow);
-            ta.write_u8_with_color(triangle.length_counter, 7, 28, White);
-            ta.write_str_with_color("LEN COUNTER LOAD", 8, 0, Yellow);
-            ta.write_u8_with_color(triangle.length_counter_load, 8, 28, White);
-            ta.write_str_with_color("LEN COUNTER HALT", 9, 0, Yellow);
-            ta.write_bool_with_color(triangle.length_counter_halt, 9, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER", 6, 0, Cyan);
+            ta.write_u8_with_color(triangle.length_counter, 6, 28, White);
+            ta.write_str_with_color("LENGTH COUNTER LOAD", 7, 0, Cyan);
+            ta.write_u8_with_color(triangle.length_counter_load, 7, 28, White);
+            ta.write_str_with_color("LENGTH COUNTER HALT", 8, 0, Cyan);
+            ta.write_bool_with_color(triangle.length_counter_halt, 8, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER ENABLED", 9, 0, Cyan);
+            ta.write_bool_with_color(triangle.length_counter_enabled, 9, 29, White);
 
             ta.write_str_with_color("SEQUENCER STEP", 10, 0, Magenta);
             ta.write_u8_with_color(triangle.sequencer_step, 10, 28, White);
 
             ta.write_str_with_color("LI", 12, 0, Green);
-            ta.write_str_with_color("LE", 12, 5, Yellow);
+            ta.write_str_with_color("LE", 12, 5, Cyan);
             ta.write_str_with_color("SE", 12, 10, Magenta);
 
             ta.write_bool_with_color(triangle.linear_counter != 0, 13, 1, White);

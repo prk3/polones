@@ -464,7 +464,8 @@ fn main() {
 
     let audio = audio_subsystem
         .open_playback(
-            audio_subsystem.audio_playback_device_name(1)
+            audio_subsystem
+                .audio_playback_device_name(0)
                 .unwrap()
                 .deref(),
             &AudioSpecDesired {

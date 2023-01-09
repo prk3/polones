@@ -192,23 +192,21 @@ impl SdlApuDebugger {
 
             ta.write_str_with_color("LENGTH COUNTER", 6, 0, Cyan);
             ta.write_u8_with_color(triangle.length_counter, 6, 28, White);
-            ta.write_str_with_color("LENGTH COUNTER LOAD", 7, 0, Cyan);
-            ta.write_u8_with_color(triangle.length_counter_load, 7, 28, White);
-            ta.write_str_with_color("LENGTH COUNTER HALT", 8, 0, Cyan);
-            ta.write_bool_with_color(triangle.length_counter_halt, 8, 29, White);
-            ta.write_str_with_color("LENGTH COUNTER ENABLED", 9, 0, Cyan);
-            ta.write_bool_with_color(triangle.length_counter_enabled, 9, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER HALT", 7, 0, Cyan);
+            ta.write_bool_with_color(triangle.length_counter_halt, 7, 29, White);
+            ta.write_str_with_color("LENGTH COUNTER ENABLED", 8, 0, Cyan);
+            ta.write_bool_with_color(triangle.length_counter_enabled, 8, 29, White);
 
-            ta.write_str_with_color("SEQUENCER STEP", 10, 0, Magenta);
-            ta.write_u8_with_color(triangle.sequencer_step, 10, 28, White);
+            ta.write_str_with_color("SEQUENCER STEP", 9, 0, Magenta);
+            ta.write_u8_with_color(triangle.sequencer_step, 9, 28, White);
 
-            ta.write_str_with_color("LI", 12, 0, Green);
-            ta.write_str_with_color("LE", 12, 5, Cyan);
-            ta.write_str_with_color("SE", 12, 10, Magenta);
+            ta.write_str_with_color("LI", 11, 0, Green);
+            ta.write_str_with_color("LE", 11, 5, Cyan);
+            ta.write_str_with_color("SE", 11, 10, Magenta);
 
-            ta.write_bool_with_color(triangle.linear_counter != 0, 13, 1, White);
-            ta.write_bool_with_color(triangle.length_counter != 0, 13, 6, White);
-            ta.write_u8_with_color(triangle.volume(), 13, 10, White);
+            ta.write_bool_with_color(triangle.linear_counter != 0, 14, 1, White);
+            ta.write_bool_with_color(triangle.length_counter != 0, 14, 6, White);
+            ta.write_u8_with_color(triangle.volume(), 14, 10, White);
         }
 
         match self.mode {

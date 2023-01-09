@@ -462,12 +462,22 @@ fn main() {
         cpu_debugger.as_ref().map(|(_, _, state)| state.clone()),
     )));
 
+    println!("device driver: {}", audio_subsystem.current_audio_driver());
+    if let Some(num) = audio_subsystem.num_audio_playback_devices() {
+        for i in 0..num {
+            if let Ok(d) = audio_subsystem.audio_playback_device_name(i) {
+                println!("Playback device {i}: {d}");
+            }
+        }
+    }
+
     let audio = audio_subsystem
         .open_playback(
-            audio_subsystem
-                .audio_playback_device_name(0)
-                .unwrap()
-                .deref(),
+            None,
+            // audio_subsystem
+            //     .audio_playback_device_name(1)
+            //     .unwrap()
+            //     .deref(),
             &AudioSpecDesired {
                 freq: Some(44100),
                 channels: Some(1),

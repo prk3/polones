@@ -603,6 +603,12 @@ fn main() {
         if let Some((_id, debugger)) = &mut graphics_debugger {
             debugger.update(nes);
         }
+        if game_window.version == nes.display.version {
+            println!("x frame_repeated {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
+        }
+        if nes.display.version > game_window.version + 1 {
+            println!("x frame_skipped {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
+        }
         if game_window.version != nes.display.version {
             std::mem::swap(&mut game_window.frame, &mut nes.display.frame);
             game_window.version = nes.display.version;
@@ -627,7 +633,9 @@ fn main() {
         if let Some((_id, debugger)) = &mut graphics_debugger {
             debugger.draw();
         }
+        println!("x game_window_ready {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
         game_window.show();
+        println!("x game_window_drawn {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
     }
 
     if let Some(inputs_file) = args.record_inputs_file {
@@ -648,6 +656,8 @@ struct AudioRunner {
 impl AudioCallback for AudioRunner {
     type Channel = u16;
     fn callback(&mut self, buffer: &mut [Self::Channel]) {
+        println!("x audio_requested {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
+
         let mut guard = loop {
             if let Ok(guard) = self.emulator.try_lock() {
                 break guard;
@@ -730,6 +740,9 @@ impl AudioCallback for AudioRunner {
                 }
             }
         }
+
+        println!("x audio_ready {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
+
     }
 }
 

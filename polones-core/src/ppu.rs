@@ -582,6 +582,7 @@ impl Ppu {
             self.buffer_index = 0;
             std::mem::swap(&mut peripherals.display.frame, &mut self.buffer);
             peripherals.display.version = peripherals.display.version.wrapping_add(1);
+            println!("x frame_ready {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
         }
 
         if self.dot == 257 {}

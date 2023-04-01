@@ -1,5 +1,8 @@
 use crate::cpu::Cpu;
-use crate::nes::{Peripherals, Samples};
+use crate::nes::Peripherals;
+
+pub type AudioSample = u16;
+pub const AUDIO_BATCH_SIZE: usize = 64;
 
 const LENGTH_COUNTER_TABLE: [u8; 32] = [
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
@@ -351,7 +354,6 @@ pub struct Apu {
     pulse2_samples: Vec<u8>,
     triangle_samples: Vec<u8>,
     noise_samples: Vec<u8>,
-    output_samples: Box<Samples>,
 }
 
 impl Apu {
@@ -375,7 +377,6 @@ impl Apu {
             pulse2_samples: Vec::with_capacity(2900),
             triangle_samples: Vec::with_capacity(2900),
             noise_samples: Vec::with_capacity(2900),
-            output_samples: Box::new([0; 64]),
         }
     }
 
@@ -652,42 +653,46 @@ impl Apu {
                 let triangle_sample = self.triangle_samples[index];
                 let noise_sample = self.noise_samples[index];
                 let dmc_sample = 0;
-                self.output_samples[i] = PULSE_MIX_TABLE[(pulse1_sample + pulse2_sample) as usize]
+                peripherals.audio.batch[i] = PULSE_MIX_TABLE
+                    [(pulse1_sample + pulse2_sample) as usize]
                     + OTHER_MIX_TABLE[3 * triangle_sample as usize
                         + 2 * noise_sample as usize
                         + dmc_sample as usize];
             }
-            // print_triangle_samples(&self.triangle_samples);
-            self.clear_samples();
-            std::mem::swap(&mut peripherals.audio.samples, &mut self.output_samples);
             peripherals.audio.version = peripherals.audio.version.wrapping_add(1);
+
+            // print_triangle_samples(&self.triangle_samples);
+            self.pulse1_samples.clear();
+            self.pulse2_samples.clear();
+            self.triangle_samples.clear();
+            self.noise_samples.clear();
         }
 
         self.cpu_cycle_odd = !self.cpu_cycle_odd;
     }
 
     // Removes all generated samples.
-    pub fn clear_samples(&mut self) {
-        self.pulse1_samples.clear();
-        self.pulse2_samples.clear();
-        self.triangle_samples.clear();
-        self.noise_samples.clear();
-    }
+    // pub fn clear_samples(&mut self) {
+    //     self.pulse1_samples.clear();
+    //     self.pulse2_samples.clear();
+    //     self.triangle_samples.clear();
+    //     self.noise_samples.clear();
+    // }
 }
 
-fn print_triangle_samples(s: &Vec<u8>) {
-    println!("samples:");
-    let mut last_value = 0;
-    let mut count = 1;
+// fn print_triangle_samples(s: &Vec<u8>) {
+//     println!("samples:");
+//     let mut last_value = 0;
+//     let mut count = 1;
 
-    for i in s {
-        if *i == last_value {
-            count += 1;
-        } else {
-            println!("v={i}, times={count}");
-            last_value = *i;
-            count = 1;
-        }
-    }
-    println!("v={last_value}, times={count}");
-}
+//     for i in s {
+//         if *i == last_value {
+//             count += 1;
+//         } else {
+//             println!("v={i}, times={count}");
+//             last_value = *i;
+//             count = 1;
+//         }
+//     }
+//     println!("v={last_value}, times={count}");
+// }

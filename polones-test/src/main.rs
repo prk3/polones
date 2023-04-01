@@ -67,7 +67,7 @@ fn main() {
         let mut flamegraph_args: Vec<String> = vec![
             "flamegraph".into(),
             "--output".into(),
-            format!("./flamegraphs/{rom_filename}.svg"),
+            format!("../flamegraphs/{rom_filename}.svg"),
             "--freq".into(),
             "20000".into(),
             "--".into(),
@@ -107,7 +107,7 @@ fn main() {
         }
     };
 
-    let inputs_path = format!("./inputs/{}.bin", rom_filename);
+    let inputs_path = format!("../inputs/{}.bin", rom_filename);
     let inputs = match std::fs::read(inputs_path) {
         Ok(inputs) => inputs,
         Err(error) => {
@@ -146,20 +146,18 @@ fn main() {
     };
 
     let mut nes = Nes::new(game_file).expect("Could not start the game");
+    nes.input.port_1 = PortState::Gamepad(GamepadState::from_byte(inputs.get(0).cloned().unwrap_or(0)));
+    nes.input.port_2 = PortState::Gamepad(GamepadState::from_byte(inputs.get(1).cloned().unwrap_or(0)));
 
     let start_time = std::time::Instant::now();
 
     let mut display_version = nes.display.version;
     let mut input_version = nes.input.read_version;
 
-    loop {
-        for _ in 0..100 {
-            nes.run_one_cpu_tick();
-        }
+    while (input_version as usize + 1) * 2 < inputs.len() {
+        nes.run_one_cpu_tick();
 
         if nes.display.version > display_version {
-            display_version = nes.display.version;
-
             if let Some((canvas, _, texture)) = &mut preview {
                 texture
                     .update(
@@ -173,24 +171,22 @@ fn main() {
                 canvas.copy(&texture, None, None).unwrap();
                 canvas.present();
             }
+
+            display_version = nes.display.version;
         }
 
         if nes.input.read_version > input_version {
-            input_version = nes.input.read_version;
-
-            if input_version as usize * 2 >= inputs.len() {
-                break;
-            }
-
-            let i = 2 * input_version as usize;
+            let i = (input_version as usize + 1) * 2;
             nes.input.port_1 = PortState::Gamepad(GamepadState::from_byte(inputs[i]));
             nes.input.port_2 = PortState::Gamepad(GamepadState::from_byte(inputs[i + 1]));
+
+            input_version = nes.input.read_version;
         }
     }
 
-    let time = start_time.elapsed().as_secs_f64();
+    let seconds = start_time.elapsed().as_secs_f64();
 
-    println!("Emulation took {time}s");
+    println!("Emulation took {seconds}s");
 
     // make sure nes is dropped before texture creator
     drop(nes);

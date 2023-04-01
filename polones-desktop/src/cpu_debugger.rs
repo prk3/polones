@@ -7,7 +7,8 @@ use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
+use parking_lot::Mutex;
 
 #[derive(Clone, Copy, Debug)]
 enum DisassemblyValue {
@@ -177,7 +178,7 @@ pub struct SdlCpuDebugger {
     cpu_state: CpuState,
     /// Shared CPU state updated on every CPU step. Should only be locked when
     /// &[mut] Nes is in scope.
-    shared_cpu_state: Arc<Mutex<SharedCpuState>>,
+    pub shared_cpu_state: SharedCpuState,
 }
 
 #[derive(Default)]
@@ -289,7 +290,7 @@ impl SdlCpuDebugger {
 
     pub fn new(
         canvas: sdl2::render::WindowCanvas,
-        shared_cpu_state: Arc<Mutex<SharedCpuState>>,
+        mut shared_cpu_state: SharedCpuState,
     ) -> Self {
         let mut canvas = canvas;
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
@@ -311,13 +312,7 @@ impl SdlCpuDebugger {
             .map(deserialize_breakpoints)
             .unwrap_or_default();
 
-        {
-            let mut scs = shared_cpu_state
-                .try_lock()
-                .expect("cpu state should not be locked when nes is not locked");
-
-            scs.breakpoints = breakpoints.clone();
-        }
+        shared_cpu_state.breakpoints = breakpoints.clone();
 
         Self {
             canvas,
@@ -461,10 +456,7 @@ impl SdlCpuDebugger {
 
     pub fn update(&mut self, nes: &mut Nes) {
         let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
-        let mut scs = self
-            .shared_cpu_state
-            .try_lock()
-            .expect("cpu state should not be locked when nes is not locked");
+        let scs = &mut self.shared_cpu_state;
 
         self.cpu_state.cpu_accumulator = cpu.accumulator;
         self.cpu_state.cpu_x_index = cpu.x_index;

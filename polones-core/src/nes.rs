@@ -1,4 +1,4 @@
-use crate::apu::Apu;
+use crate::apu::{Apu, AudioSample, AUDIO_BATCH_SIZE};
 use crate::cpu::Cpu;
 use crate::game_file::GameFile;
 use crate::io::Io;
@@ -7,10 +7,11 @@ use crate::ppu::Ppu;
 use crate::ram::Ram;
 
 pub type Frame = [[(u8, u8, u8); 256]; 240];
-pub type Samples = [u16; 64];
+pub type Sample = u16;
 
 pub struct Display {
     pub frame: Box<Frame>,
+    pub cpu_cycle: u64,
     pub version: u32,
 }
 
@@ -18,6 +19,7 @@ impl Display {
     fn new() -> Self {
         Self {
             frame: Box::new([[(0, 0, 0); 256]; 240]),
+            cpu_cycle: 0,
             version: 0,
         }
     }
@@ -86,14 +88,14 @@ impl Input {
 }
 
 pub struct Audio {
-    pub samples: Box<Samples>,
+    pub batch: [AudioSample; AUDIO_BATCH_SIZE],
     pub version: u32,
 }
 
 impl Audio {
     fn new() -> Self {
         Self {
-            samples: Box::new([0; 64]),
+            batch: [Default::default(); AUDIO_BATCH_SIZE],
             version: 0,
         }
     }

@@ -1,6 +1,5 @@
 extern crate plotly;
 use plotly::common::Mode;
-use plotly::layout::Axis;
 use plotly::{Plot, Scatter, Trace};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,106 +18,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let min_time = data.iter().map(|(_, time)| *time).min().unwrap();
-
-    for (event, time) in &mut data {
+    for (_, time) in &mut data {
         *time -= min_time;
     }
 
-    let mut traces = Vec::<Box<dyn Trace + 'static>>::new();
+    let audio_requested_series: Vec<u64> = data
+        .iter()
+        .filter_map(|(event, time)| (event == "audio_requested").then(|| *time))
+        .collect();
+    let mut max_gap = 0;
+    for i in 1..audio_requested_series.len() {
+        max_gap = std::cmp::max(max_gap, audio_requested_series[i] - audio_requested_series[i - 1]);
+    }
+    dbg!(max_gap);
 
-    traces.push(
+    let trace = |event, y| {
         Scatter::new(
             data.iter()
-                .filter_map(|(event, time)| (event == "audio_requested").then(|| *time as f32))
+                .filter_map(|(e, time)| (e == event).then(|| *time as f32))
                 .collect(),
             data.iter()
-                .filter_map(|(event, time)| (event == "audio_requested").then(|| 0.0))
+                .filter_map(|(e, _)| (e == event).then(|| y))
                 .collect(),
         )
-        .name("audio_requested")
-        .mode(Mode::Markers),
-    );
+        .name(event)
+        .mode(Mode::Markers)
+    };
 
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "audio_ready").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "audio_ready").then(|| 2.0))
-                .collect(),
-        )
-        .name("audio_ready")
-        .mode(Mode::Markers),
-    );
+    let traces: Vec<Box<dyn Trace + 'static>> = vec![
 
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_ready").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_ready").then(|| 5.0))
-                .collect(),
-        )
-        .name("frame_ready")
-        .mode(Mode::Markers),
-    );
+        trace("refresher_lock", 0.0),
+        trace("refresher_start", 1.0),
+        trace("frame_ready", 2.0),
+        trace("refresher_end", 3.0),
 
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "game_window_drawn").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "game_window_drawn").then(|| 10.0))
-                .collect(),
-        )
-        .name("game_window_drawn")
-        .mode(Mode::Markers),
-    );
+        trace("audio_lock", 5.0),
+        trace("audio_start", 6.0),
+        trace("audio_end", 7.0),
 
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "game_window_ready").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "game_window_ready").then(|| 12.0))
-                .collect(),
-        )
-        .name("game_window_ready")
-        .mode(Mode::Markers),
-    );
+        trace("window_start", 10.0),
+        trace("window_lock", 11.0),
+        trace("window_locked", 12.0),
+        trace("window_end", 13.0),
 
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_repeated").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_repeated").then(|| 15.0))
-                .collect(),
-        )
-        .name("frame_repeated")
-        .mode(Mode::Markers),
-    );
-
-    traces.push(
-        Scatter::new(
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_skipped").then(|| *time as f32))
-                .collect(),
-            data.iter()
-                .filter_map(|(event, time)| (event == "frame_skipped").then(|| 17.0))
-                .collect(),
-        )
-        .name("frame_skipped")
-        .mode(Mode::Markers),
-    );
+        trace("frame_repeated", 15.0),
+        trace("frame_skipped", 16.0),
+    ];
 
     let mut plot = Plot::new();
-    // plot.set_layout(plotly::Layout::new().y_axis(Axis::new().range(vec![0, 100])));
     plot.add_traces(traces);
     plot.show();
 

@@ -7,13 +7,14 @@ use parking_lot::Mutex;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Frame, GamepadState, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
-use sdl2::audio::{AudioCallback, AudioQueue, AudioSpecDesired};
+use sdl2::audio::{AudioCallback, AudioDevice, AudioQueue, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::mem::size_of;
 use std::ops::Deref;
@@ -481,29 +482,54 @@ fn main() {
     //     }
     // }
 
-    // let audio_queue: AudioQueue<u16> = audio_subsystem
-    //     .open_queue(
-    //         Some(
-    //             audio_subsystem
-    //                 .audio_playback_device_name(0)
-    //                 .unwrap()
-    //                 .as_str(),
-    //         ),
-    //         &AudioSpecDesired {
-    //             freq: Some(44100),
-    //             channels: Some(1),
-    //             samples: None,
-    //         },
-    //     )
-    //     .unwrap();
+    let (audio_sender, audio_receiver) = std::sync::mpsc::channel();
+
+    let refresh_rate = game_window
+        .canvas
+        .window()
+        .display_mode()
+        .map(|mode| mode.refresh_rate)
+        .unwrap_or(60);
+
+    // CPU cycles per frame = 29780.5*
+    let mut audio_version = 0;
+    let audio_samples_per_draw = 30 * 59561 / refresh_rate as usize;
+
+    let audio_queue: AudioDevice<AudioRunner> = audio_subsystem
+        .open_playback(
+            Some(
+                audio_subsystem
+                    .audio_playback_device_name(1)
+                    .unwrap()
+                    .as_str(),
+            ),
+            &AudioSpecDesired {
+                freq: Some(44100),
+                channels: Some(1),
+                samples: Some(256),
+            },
+            |_| AudioRunner {
+                source: audio_receiver,
+                samples: VecDeque::with_capacity(audio_samples_per_draw * 5),
+                record_audio_file: args.record_audio_file,
+                record_samples: Vec::new(),
+            },
+        )
+        .unwrap();
 
     // let mut start = vec![0; 50000];
     // start.iter_mut().enumerate().for_each(|(i, n)| *n = (((i as f32/440.0).sin() + 1.0) * 10000.0) as u16);
     // dbg!(&start[0..1000]);
 
     // push two frames of audio samples to the queue
-    // audio_queue.queue_audio(&[0; 1470]).unwrap();
-    // audio_queue.resume();
+    audio_sender
+        .send(
+            std::iter::repeat(0)
+                .take(audio_samples_per_draw * 0)
+                .collect(),
+        )
+        .unwrap();
+    audio_queue.resume();
 
     'ui_loop: loop {
         // handle window events
@@ -564,7 +590,7 @@ fn main() {
             .unwrap_or(60);
 
         // CPU cycles per frame = 29780.5*
-        let ticks_this_frame = 30 * 59561 / refresh_rate;
+        let ticks_this_frame = 59561 * 30 / refresh_rate;
 
         if args.record_inputs {
             while inputs_version != nes.input.read_version {
@@ -619,8 +645,25 @@ fn main() {
                 //     }
                 // }
             } else {
-                for _ in 0..ticks_this_frame {
-                    nes.run_one_cpu_tick();
+                let t = std::time::Instant::now();
+                let mut i = 0;
+                while i < ticks_this_frame {
+                    if i + 1000 < ticks_this_frame {
+                        for _ in 0..1000 {
+                            nes.run_one_cpu_tick();
+                        }
+                        i += 1000;
+                    } else {
+                        while i < ticks_this_frame {
+                            nes.run_one_cpu_tick();
+                            i += 1;
+                        }
+                    }
+
+                    if nes.audio.version != audio_version {
+                        audio_version = nes.audio.version;
+                        let _ = audio_sender.send(std::mem::take(&mut nes.audio.samples));
+                    }
                     // nes.apu.clear_samples();
                 }
                 // let queue_len = audio_queue.size() as usize / size_of::<u16>();
@@ -708,10 +751,10 @@ fn main() {
 }
 
 struct AudioRunner {
-    emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>,
-    version: u32,
+    source: std::sync::mpsc::Receiver<Vec<u16>>,
+    samples: VecDeque<u16>,
     record_audio_file: Option<String>,
-    samples: Vec<u16>,
+    record_samples: Vec<u16>,
 }
 
 impl AudioCallback for AudioRunner {
@@ -719,27 +762,29 @@ impl AudioCallback for AudioRunner {
     fn callback(&mut self, buffer: &mut [Self::Channel]) {
         log_event("audio_lock");
 
-        let mut guard = self.emulator.lock();
-
-        log_event("audio_start");
-
-        match &mut *guard {
-            (state, nes, _) if state.running => {
-                // if nes.audio.samples.len() >= 256 {
-                //     for i in 0..256 {
-                //         let sample = nes.audio.samples.pop_front().unwrap();
-                //         buffer[i] = sample;
-                //     }
-                // } else {
-                //     for i in 0..256 {
-                //         // let sample = nes.audio.samples.pop_front().unwrap();
-                //         buffer[i] = 0;
-                //     }
-                // }
-            }
-            _ => {}
+        while let Ok(samples) = self.source.try_recv() {
+            self.samples.extend(samples);
         }
 
+        let samples_standard = 1789772 * 256 / 44100;
+        let samples_to_use = std::cmp::min(self.samples.len(), samples_standard);
+
+        if self.samples.len() < samples_standard {
+            println!("missed by {}%", (samples_standard - self.samples.len()) as f64 / samples_standard as f64 * 100.0)
+        }
+
+        if !self.samples.is_empty() {
+            for i in 0..256 {
+                buffer[i] = self.samples[i * samples_to_use / 256];
+            }
+            self.samples.drain(0..samples_to_use);
+        } else {
+            for i in 0..256 {
+                buffer[i] = 0;
+            }
+        }
+
+        log_event("audio_start");
         log_event("audio_end");
     }
 }
@@ -747,7 +792,7 @@ impl AudioCallback for AudioRunner {
 impl Drop for AudioRunner {
     fn drop(&mut self) {
         if let Some(path) = &self.record_audio_file {
-            write_wave(path, &self.samples).unwrap();
+            write_wave(path, &self.record_samples).unwrap();
         }
     }
 }

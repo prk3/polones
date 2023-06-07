@@ -350,10 +350,7 @@ pub struct Apu {
     pub frame_counter_interrupt_inhibit: bool,
     pub frame_counter: u16,
 
-    pulse1_samples: Vec<u8>,
-    pulse2_samples: Vec<u8>,
-    triangle_samples: Vec<u8>,
-    noise_samples: Vec<u8>,
+    samples: Vec<u16>,
 }
 
 impl Apu {
@@ -373,10 +370,7 @@ impl Apu {
             frame_counter_interrupt_inhibit: false,
             frame_counter: 0,
 
-            pulse1_samples: Vec::with_capacity(2900),
-            pulse2_samples: Vec::with_capacity(2900),
-            triangle_samples: Vec::with_capacity(2900),
-            noise_samples: Vec::with_capacity(2900),
+            samples: Vec::with_capacity(1024 * 16),
         }
     }
 
@@ -638,34 +632,25 @@ impl Apu {
 
         self.triangle.tick();
 
-        self.pulse1_samples
-            .push(!self.pulse1.muted() as u8 * self.pulse1.volume());
-        self.pulse2_samples
-            .push(!self.pulse2.muted() as u8 * self.pulse2.volume());
-        self.triangle_samples.push(self.triangle.volume());
-        self.noise_samples.push(self.noise.volume());
+        let pulse1_sample = !self.pulse1.muted() as u8 * self.pulse1.volume();
+        let pulse2_sample = !self.pulse2.muted() as u8 * self.pulse2.volume();
+        let triangle_sample = self.triangle.volume();
+        let noise_sample = self.noise.volume();
+        let dmc_sample = 0;
 
-        if self.pulse1_samples.len() == (64.0f64 * (1_789_773.0 / 44_100.0)).round() as usize {
-            for i in 0..64 {
-                let index = (i as f64 * (1_789_773.0 / 44_100.0)).round() as usize;
-                let pulse1_sample = self.pulse1_samples[index];
-                let pulse2_sample = self.pulse2_samples[index];
-                let triangle_sample = self.triangle_samples[index];
-                let noise_sample = self.noise_samples[index];
-                let dmc_sample = 0;
-                peripherals.audio.batch[i] = PULSE_MIX_TABLE
-                    [(pulse1_sample + pulse2_sample) as usize]
-                    + OTHER_MIX_TABLE[3 * triangle_sample as usize
-                        + 2 * noise_sample as usize
-                        + dmc_sample as usize];
-            }
+        let mix = PULSE_MIX_TABLE
+            [(pulse1_sample + pulse2_sample) as usize]
+            + OTHER_MIX_TABLE[3 * triangle_sample as usize
+                + 2 * noise_sample as usize
+                + dmc_sample as usize];
+
+        self.samples.push(mix);
+
+        if self.samples.len() == 1024 * 16 {
             peripherals.audio.version = peripherals.audio.version.wrapping_add(1);
-
-            // print_triangle_samples(&self.triangle_samples);
-            self.pulse1_samples.clear();
-            self.pulse2_samples.clear();
-            self.triangle_samples.clear();
-            self.noise_samples.clear();
+            std::mem::swap(&mut peripherals.audio.samples, &mut self.samples);
+            self.samples.clear();
+            self.samples.reserve(1024 * 16);
         }
 
         self.cpu_cycle_odd = !self.cpu_cycle_odd;

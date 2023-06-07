@@ -88,14 +88,14 @@ impl Input {
 }
 
 pub struct Audio {
-    pub batch: [AudioSample; AUDIO_BATCH_SIZE],
+    pub samples: Vec<u16>,
     pub version: u32,
 }
 
 impl Audio {
     fn new() -> Self {
         Self {
-            batch: [Default::default(); AUDIO_BATCH_SIZE],
+            samples: Vec::new(),
             version: 0,
         }
     }

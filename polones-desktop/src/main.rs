@@ -271,13 +271,6 @@ struct Args {
 }
 
 fn main() {
-    let sdl_context = sdl2::init().unwrap();
-    let audio_subsystem = sdl_context.audio().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-
-}
-
-fn main2() {
     let args = Args::parse();
 
     let rom_filename = {
@@ -563,10 +556,28 @@ fn main2() {
             break 'ui_loop;
         }
 
+        let refresh_rate = game_window
+            .canvas
+            .window()
+            .display_mode()
+            .map(|mode| mode.refresh_rate)
+            .unwrap_or(60);
+
+        // CPU cycles per frame = 29780.5*
+        let ticks_this_frame = 30 * 59561 / refresh_rate;
+
         if args.record_inputs {
             while inputs_version != nes.input.read_version {
-                inputs.push(if let PortState::Gamepad(g) = &nes.input.port_1 { g.to_byte() } else { panic!() });
-                inputs.push(if let PortState::Gamepad(g) = &nes.input.port_2 { g.to_byte() } else { panic!() });
+                inputs.push(if let PortState::Gamepad(g) = &nes.input.port_1 {
+                    g.to_byte()
+                } else {
+                    panic!()
+                });
+                inputs.push(if let PortState::Gamepad(g) = &nes.input.port_2 {
+                    g.to_byte()
+                } else {
+                    panic!()
+                });
                 inputs_version = inputs_version.wrapping_add(1);
             }
         }
@@ -608,10 +619,8 @@ fn main2() {
                 //     }
                 // }
             } else {
-                while game_window.version == nes.display.version {
-                    for _ in 0..500 {
-                        nes.run_one_cpu_tick();
-                    }
+                for _ in 0..ticks_this_frame {
+                    nes.run_one_cpu_tick();
                     // nes.apu.clear_samples();
                 }
                 // let queue_len = audio_queue.size() as usize / size_of::<u16>();
@@ -698,74 +707,74 @@ fn main2() {
     }
 }
 
-// struct AudioRunner {
-//     emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>,
-//     version: u32,
-//     record_audio_file: Option<String>,
-//     samples: Vec<u16>,
-// }
+struct AudioRunner {
+    emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>,
+    version: u32,
+    record_audio_file: Option<String>,
+    samples: Vec<u16>,
+}
 
-// impl AudioCallback for AudioRunner {
-//     type Channel = u16;
-//     fn callback(&mut self, buffer: &mut [Self::Channel]) {
-//         log_event("audio_lock");
+impl AudioCallback for AudioRunner {
+    type Channel = u16;
+    fn callback(&mut self, buffer: &mut [Self::Channel]) {
+        log_event("audio_lock");
 
-//         let mut guard = self.emulator.lock();
+        let mut guard = self.emulator.lock();
 
-//         log_event("audio_start");
+        log_event("audio_start");
 
-//         match &mut *guard {
-//             (state, nes, _) if state.running => {
-//                 if nes.audio.samples.len() >= 256 {
-//                     for i in 0..256 {
-//                         let sample = nes.audio.samples.pop_front().unwrap();
-//                         buffer[i] = sample;
-//                     }
-//                 } else {
-//                     for i in 0..256 {
-//                         // let sample = nes.audio.samples.pop_front().unwrap();
-//                         buffer[i] = 0;
-//                     }
-//                 }
-//             }
-//             _ => {}
-//         }
+        match &mut *guard {
+            (state, nes, _) if state.running => {
+                // if nes.audio.samples.len() >= 256 {
+                //     for i in 0..256 {
+                //         let sample = nes.audio.samples.pop_front().unwrap();
+                //         buffer[i] = sample;
+                //     }
+                // } else {
+                //     for i in 0..256 {
+                //         // let sample = nes.audio.samples.pop_front().unwrap();
+                //         buffer[i] = 0;
+                //     }
+                // }
+            }
+            _ => {}
+        }
 
-//         log_event("audio_end");
-//     }
-// }
+        log_event("audio_end");
+    }
+}
 
-// impl Drop for AudioRunner {
-//     fn drop(&mut self) {
-//         if let Some(path) = &self.record_audio_file {
-//             write_wave(path, &self.samples).unwrap();
-//         }
-//     }
-// }
+impl Drop for AudioRunner {
+    fn drop(&mut self) {
+        if let Some(path) = &self.record_audio_file {
+            write_wave(path, &self.samples).unwrap();
+        }
+    }
+}
 
-// fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
-//     let file = std::fs::File::create(path)?;
-//     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
 
-//     writer.write(b"RIFF")?;
-//     writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
-//     writer.write(b"WAVE")?;
-//     writer.write(b"fmt ")?;
-//     writer.write(&16u32.to_le_bytes())?;
-//     writer.write(&1u16.to_le_bytes())?;
-//     writer.write(&1u16.to_le_bytes())?;
-//     writer.write(&44_100u32.to_le_bytes())?;
-//     writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
-//     writer.write(&(2u16).to_le_bytes())?;
-//     writer.write(&(16u16).to_le_bytes())?;
-//     writer.write(b"data")?;
-//     writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
+    writer.write(b"RIFF")?;
+    writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
+    writer.write(b"WAVE")?;
+    writer.write(b"fmt ")?;
+    writer.write(&16u32.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&1u16.to_le_bytes())?;
+    writer.write(&44_100u32.to_le_bytes())?;
+    writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
+    writer.write(&(2u16).to_le_bytes())?;
+    writer.write(&(16u16).to_le_bytes())?;
+    writer.write(b"data")?;
+    writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
 
-//     for s in samples.iter() {
-//         writer.write(&s.to_le_bytes())?;
-//     }
-//     Ok(())
-// }
+    for s in samples.iter() {
+        writer.write(&s.to_le_bytes())?;
+    }
+    Ok(())
+}
 
 // fn refresh(emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>) {
 //     loop {
@@ -784,7 +793,6 @@ fn main2() {
 //         std::thread::sleep(std::time::Duration::from_millis(1));
 //     }
 // }
-
 
 fn log_event(event: &str) {
     let micros = std::time::SystemTime::now()

@@ -1,31 +1,28 @@
 use apu_debugger::SdlApuDebugger;
 use clap::Parser;
-use cpu_debugger::{SdlCpuDebugger, SharedCpuState};
+use cpu_debugger::SdlCpuDebugger;
 use graphics_debugger::SdlGraphicsDebugger;
 use memory_debugger::SdlMemoryDebugger;
-use parking_lot::Mutex;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Frame, GamepadState, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
-use sdl2::audio::{AudioCallback, AudioDevice, AudioQueue, AudioSpecDesired};
+use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
 use sdl2::video::WindowContext;
+use sdl_extensions::get_default_playback_device_name;
 use std::collections::VecDeque;
-use std::io::Write;
-use std::mem::size_of;
-use std::ops::Deref;
 use std::path::Component;
-use std::sync::Arc;
 
 mod apu_debugger;
 mod cpu_debugger;
 mod graphics_debugger;
 mod memory_debugger;
 mod ppu_debugger;
+mod sdl_extensions;
 mod text_area;
 
 struct SdlGameWindow {
@@ -70,7 +67,7 @@ impl SdlGameWindow {
         }
     }
 
-    fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
+    fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
@@ -181,7 +178,7 @@ impl SdlGameWindow {
         }
     }
 
-    fn show(&mut self) {
+    fn draw_and_wait(&mut self, _nes: &mut Nes) {
         let mut data = [0; Self::WIDTH as usize * Self::HEIGHT as usize * 4];
         for y in 0..Self::HEIGHT as usize {
             for x in 0..Self::WIDTH as usize {
@@ -266,9 +263,6 @@ struct Args {
 
     #[arg(long)]
     record_inputs: bool,
-
-    #[arg(long)]
-    record_audio_file: Option<String>,
 }
 
 fn main() {
@@ -345,7 +339,7 @@ fn main() {
             .unwrap();
         (
             cpu_debugger_window_id,
-            SdlCpuDebugger::new(cpu_debugger_canvas, SharedCpuState::default()),
+            SdlCpuDebugger::new(cpu_debugger_canvas),
         )
     });
 
@@ -451,36 +445,23 @@ fn main() {
     };
 
     if let Some((_id, debugger)) = &mut cpu_debugger {
-        debugger.update(&mut nes);
-        debugger.draw();
+        debugger.update_disassembly(&mut nes);
+        debugger.draw(&mut nes);
     }
     if let Some((_id, debugger)) = &mut ppu_debugger {
-        debugger.update(&mut nes);
-        debugger.draw();
+        debugger.draw(&mut nes);
     }
     if let Some((_id, debugger)) = &mut apu_debugger {
-        debugger.update(&mut nes);
-        debugger.draw();
+        debugger.draw(&mut nes);
     }
     if let Some((_id, debugger)) = &mut memory_debugger {
-        debugger.update(&mut nes);
-        debugger.draw();
+        debugger.draw(&mut nes);
     }
     if let Some((_id, debugger)) = &mut graphics_debugger {
-        debugger.update(&mut nes);
-        debugger.draw();
+        debugger.draw(&mut nes);
     }
 
-    game_window.show();
-
-    // println!("device driver: {}", audio_subsystem.current_audio_driver());
-    // if let Some(num) = audio_subsystem.num_audio_playback_devices() {
-    //     for i in 0..num {
-    //         if let Ok(d) = audio_subsystem.audio_playback_device_name(i) {
-    //             println!("Playback device {i}: {d}");
-    //         }
-    //     }
-    // }
+    game_window.draw_and_wait(&mut nes);
 
     let (audio_sender, audio_receiver) = std::sync::mpsc::channel();
 
@@ -492,17 +473,13 @@ fn main() {
         .unwrap_or(60);
 
     // CPU cycles per frame = 29780.5*
-    let mut audio_version = 0;
-    let audio_samples_per_draw = 30 * 59561 / refresh_rate as usize;
+    let audio_samples_per_draw = 59561 * 30 / refresh_rate;
 
-    let audio_queue: AudioDevice<AudioRunner> = audio_subsystem
+    let default_playback_device_name = get_default_playback_device_name();
+
+    let audio_playback: AudioDevice<AudioRunner> = audio_subsystem
         .open_playback(
-            Some(
-                audio_subsystem
-                    .audio_playback_device_name(1)
-                    .unwrap()
-                    .as_str(),
-            ),
+            default_playback_device_name.as_deref(),
             &AudioSpecDesired {
                 freq: Some(44100),
                 channels: Some(1),
@@ -510,66 +487,61 @@ fn main() {
             },
             |_| AudioRunner {
                 source: audio_receiver,
-                samples: VecDeque::with_capacity(audio_samples_per_draw * 5),
-                record_audio_file: args.record_audio_file,
-                record_samples: Vec::new(),
+                samples: VecDeque::with_capacity(audio_samples_per_draw as usize * 5),
             },
         )
         .unwrap();
+    let mut audio_version = 0;
 
-    // let mut start = vec![0; 50000];
-    // start.iter_mut().enumerate().for_each(|(i, n)| *n = (((i as f32/440.0).sin() + 1.0) * 10000.0) as u16);
-    // dbg!(&start[0..1000]);
-
-    // push two frames of audio samples to the queue
-    audio_sender
-        .send(
-            std::iter::repeat(0)
-                .take(audio_samples_per_draw * 0)
-                .collect(),
-        )
-        .unwrap();
-    audio_queue.resume();
+    // push two frame's worth of silence to the audio runner
+    let _ = audio_sender.send(
+        std::iter::repeat(0)
+            .take(audio_samples_per_draw as usize * 2)
+            .collect(),
+    );
+    audio_playback.resume();
 
     'ui_loop: loop {
+        let old_state = state.clone();
+
         // handle window events
         for event in event_pump.poll_iter() {
             let event_id = event.get_window_id();
             if event.get_window_id() == Some(game_window_id) {
-                game_window.handle_event(event, &mut state);
+                game_window.handle_event(&mut nes, event, &mut state);
                 continue;
             }
             match &mut cpu_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &mut state);
+                    debugger.handle_event(&mut nes, event, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut ppu_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &mut state);
+                    debugger.handle_event(&mut nes, event, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut apu_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &mut state);
+                    debugger.handle_event(&mut nes, event, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut memory_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &mut state);
+                    debugger.handle_event(&mut nes, event, &mut state);
                     continue;
                 }
                 _ => {}
             }
             match &mut graphics_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
-                    debugger.handle_event(event, &mut state);
+                    debugger.handle_event(&mut nes, event, &mut state);
                     continue;
                 }
                 _ => {}
@@ -578,7 +550,7 @@ fn main() {
 
         // exit if UI thread requested exit
         if state.exit {
-            //audio_queue.pause();
+            audio_playback.pause();
             break 'ui_loop;
         }
 
@@ -590,7 +562,7 @@ fn main() {
             .unwrap_or(60);
 
         // CPU cycles per frame = 29780.5*
-        let ticks_this_frame = 59561 * 30 / refresh_rate;
+        let audio_samples_per_draw = 59561 * 30 / refresh_rate;
 
         if args.record_inputs {
             while inputs_version != nes.input.read_version {
@@ -616,130 +588,86 @@ fn main() {
         if state.one_step {
             nes.run_one_cpu_instruction();
             if let Some((_id, debugger)) = &mut cpu_debugger {
-                debugger.shared_cpu_state.update_instructions(&mut nes);
+                debugger.update_disassembly(&mut nes);
             }
-            state.running = false;
+            nes.apu.clear_samples();
+            audio_version = nes.audio.version;
             state.one_step = false;
         } else if state.running {
+            if !old_state.running {
+                // emulation was just resumed
+                // send empty vec to tell the audio runner to remove old samples
+                let _ = audio_sender.send(Vec::new());
+                // push two frame's worth of silence to the audio runner
+                let _ = audio_sender.send(
+                    std::iter::repeat(0)
+                        .take(audio_samples_per_draw as usize * 2)
+                        .collect(),
+                );
+                audio_playback.resume();
+            }
+
             if let Some((_id, debugger)) = &mut cpu_debugger {
-                panic!();
-                // while nes.audio.samples.len() < 1470 {
-                //     for _ in 0..500 {
-                //         nes.run_one_cpu_tick();
-                //         debugger.shared_cpu_state.update_instructions(&mut nes);
+                for _ in 0..audio_samples_per_draw {
+                    nes.run_one_cpu_tick();
+                    debugger.update_disassembly(&mut nes);
 
-                //         if debugger
-                //             .shared_cpu_state
-                //             .breakpoints
-                //             .contains(&nes.cpu.program_counter)
-                //         {
-                //             while !nes.cpu.finished_instruction() {
-                //                 nes.run_one_cpu_tick();
-                //                 debugger.shared_cpu_state.update_instructions(&mut nes);
-                //             }
-                //             state.running = false;
-                //             nes.apu.clear_samples();
-                //             nes.audio.samples.clear();
-                //             break;
-                //         }
-                //     }
-                // }
-            } else {
-                let t = std::time::Instant::now();
-                let mut i = 0;
-                while i < ticks_this_frame {
-                    if i + 1000 < ticks_this_frame {
-                        for _ in 0..1000 {
-                            nes.run_one_cpu_tick();
-                        }
-                        i += 1000;
-                    } else {
-                        while i < ticks_this_frame {
-                            nes.run_one_cpu_tick();
-                            i += 1;
-                        }
-                    }
-
-                    if nes.audio.version != audio_version {
+                    if audio_version != nes.audio.version {
                         audio_version = nes.audio.version;
                         let _ = audio_sender.send(std::mem::take(&mut nes.audio.samples));
                     }
-                    // nes.apu.clear_samples();
-                }
-                // let queue_len = audio_queue.size() as usize / size_of::<u16>();
-                // let mut generated_samples = 0;
-                // let batch_size = 256;
 
-                // log_event("emulation_start");
-                // while queue_len + generated_samples < 1470 {
-                //     while nes.audio.samples.len() < batch_size {
-                //         for _ in 0..500 {
-                //             nes.run_one_cpu_tick();
-                //         }
-                //     }
-                //     let (s1, s2) = nes.audio.samples.as_slices();
-                //     if s1.len() >= batch_size {
-                //         audio_queue.queue_audio(&s1[0..batch_size]).unwrap();
-                //     } else {
-                //         audio_queue.queue_audio(s1).unwrap();
-                //         audio_queue.queue_audio(&s2[0..(batch_size-s1.len())]).unwrap();
-                //     }
-                //     nes.audio.samples.drain(0..batch_size);
-                //     generated_samples += batch_size;
-                // }
-                // log_event("emulation_end");
+                    if debugger.breakpoints.contains(&nes.cpu.program_counter) {
+                        while !nes.cpu.finished_instruction() {
+                            nes.run_one_cpu_tick();
+                            debugger.update_disassembly(&mut nes);
+                        }
+                        nes.apu.clear_samples();
+                        audio_version = nes.audio.version;
+                        state.running = false;
+                        break;
+                    }
+                }
+            } else {
+                for _ in 0..audio_samples_per_draw {
+                    nes.run_one_cpu_tick();
+
+                    if audio_version != nes.audio.version {
+                        audio_version = nes.audio.version;
+                        let _ = audio_sender.send(std::mem::take(&mut nes.audio.samples));
+                    }
+                }
             }
         } else {
-            // maybe clear audio samples?
+            // state.running == false
+            if old_state.running {
+                // emulation was just paused
+                audio_playback.pause();
+            }
         }
 
-        // update windows with current nes state
-        if let Some((_id, debugger)) = &mut cpu_debugger {
-            debugger.update(&mut nes);
-        }
-        if let Some((_id, debugger)) = &mut ppu_debugger {
-            debugger.update(&mut nes);
-        }
-        if let Some((_id, debugger)) = &mut apu_debugger {
-            debugger.update(&mut nes);
-        }
-        if let Some((_id, debugger)) = &mut memory_debugger {
-            debugger.update(&mut nes);
-        }
-        if let Some((_id, debugger)) = &mut graphics_debugger {
-            debugger.update(&mut nes);
-        }
-        if game_window.version == nes.display.version {
-            // log_event("frame_repeated");
-        }
-        if nes.display.version > game_window.version + 1 {
-            // log_event("frame_skipped");
-        }
         if game_window.version != nes.display.version {
-            // eprintln!("frame");
-            std::mem::swap(&mut game_window.frame, &mut nes.display.frame);
             game_window.version = nes.display.version;
+            std::mem::swap(&mut game_window.frame, &mut nes.display.frame);
         }
 
         // draw new game and debugger content
         if let Some((_id, debugger)) = &mut cpu_debugger {
-            debugger.draw();
+            debugger.draw(&mut nes);
         }
         if let Some((_id, debugger)) = &mut ppu_debugger {
-            debugger.draw();
+            debugger.draw(&mut nes);
         }
         if let Some((_id, debugger)) = &mut apu_debugger {
-            debugger.draw();
+            debugger.draw(&mut nes);
         }
         if let Some((_id, debugger)) = &mut memory_debugger {
-            debugger.draw();
+            debugger.draw(&mut nes);
         }
         if let Some((_id, debugger)) = &mut graphics_debugger {
-            debugger.draw();
+            debugger.draw(&mut nes);
         }
-        // log_event("window_end");
-        game_window.show();
-        // log_event("window_start");
+        game_window.draw_and_wait(&mut nes);
     }
 
     if args.record_inputs {
@@ -753,25 +681,21 @@ fn main() {
 struct AudioRunner {
     source: std::sync::mpsc::Receiver<Vec<u16>>,
     samples: VecDeque<u16>,
-    record_audio_file: Option<String>,
-    record_samples: Vec<u16>,
 }
 
 impl AudioCallback for AudioRunner {
     type Channel = u16;
     fn callback(&mut self, buffer: &mut [Self::Channel]) {
-        log_event("audio_lock");
-
         while let Ok(samples) = self.source.try_recv() {
-            self.samples.extend(samples);
+            if samples.is_empty() {
+                self.samples.clear();
+            } else {
+                self.samples.extend(samples);
+            }
         }
 
         let samples_standard = 1789772 * 256 / 44100;
         let samples_to_use = std::cmp::min(self.samples.len(), samples_standard);
-
-        if self.samples.len() < samples_standard {
-            println!("missed by {}%", (samples_standard - self.samples.len()) as f64 / samples_standard as f64 * 100.0)
-        }
 
         if !self.samples.is_empty() {
             for i in 0..256 {
@@ -783,66 +707,31 @@ impl AudioCallback for AudioRunner {
                 buffer[i] = 0;
             }
         }
-
-        log_event("audio_start");
-        log_event("audio_end");
     }
 }
 
-impl Drop for AudioRunner {
-    fn drop(&mut self) {
-        if let Some(path) = &self.record_audio_file {
-            write_wave(path, &self.record_samples).unwrap();
-        }
-    }
-}
-
-fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
-
-    writer.write(b"RIFF")?;
-    writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
-    writer.write(b"WAVE")?;
-    writer.write(b"fmt ")?;
-    writer.write(&16u32.to_le_bytes())?;
-    writer.write(&1u16.to_le_bytes())?;
-    writer.write(&1u16.to_le_bytes())?;
-    writer.write(&44_100u32.to_le_bytes())?;
-    writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
-    writer.write(&(2u16).to_le_bytes())?;
-    writer.write(&(16u16).to_le_bytes())?;
-    writer.write(b"data")?;
-    writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
-
-    for s in samples.iter() {
-        writer.write(&s.to_le_bytes())?;
-    }
-    Ok(())
-}
-
-// fn refresh(emulator: Arc<Mutex<(EmulatorState, Nes, Option<Arc<Mutex<SharedCpuState>>>)>>) {
-//     loop {
-//         log_event("refresher_lock");
-
-//         let mut guard = emulator.lock();
-
-//         if guard.0.exit {
-//             return;
-//         }
-
-//         log_event("refresher_start");
-
-//         log_event("refresher_end");
-
-//         std::thread::sleep(std::time::Duration::from_millis(1));
+// fn write_wave(path: &str, samples: &[u16]) -> std::io::Result<()> {
+//     use std::io::Write;
+//
+//     let file = std::fs::File::create(path)?;
+//     let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+//
+//     writer.write(b"RIFF")?;
+//     writer.write(&(samples.len() as u32 * 2 + 36).to_le_bytes())?;
+//     writer.write(b"WAVE")?;
+//     writer.write(b"fmt ")?;
+//     writer.write(&16u32.to_le_bytes())?;
+//     writer.write(&1u16.to_le_bytes())?;
+//     writer.write(&1u16.to_le_bytes())?;
+//     writer.write(&44_100u32.to_le_bytes())?;
+//     writer.write(&(44_100u32 * 2 * 1 / 8).to_le_bytes())?;
+//     writer.write(&(2u16).to_le_bytes())?;
+//     writer.write(&(16u16).to_le_bytes())?;
+//     writer.write(b"data")?;
+//     writer.write(&(samples.len() as u32 * 1 * 16 / 8).to_le_bytes())?;
+//
+//     for s in samples.iter() {
+//         writer.write(&s.to_le_bytes())?;
 //     }
+//     Ok(())
 // }
-
-fn log_event(event: &str) {
-    let micros = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_micros();
-    // println!("x {event} {micros}");
-}

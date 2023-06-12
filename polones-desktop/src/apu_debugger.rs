@@ -14,21 +14,6 @@ pub struct SdlApuDebugger {
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
     mode: u8,
-    apu_state: ApuState,
-}
-
-struct ApuState {
-    pulse: Pulse,
-    triangle: Triangle,
-}
-
-impl Default for ApuState {
-    fn default() -> Self {
-        Self {
-            pulse: Pulse::new_with_complement(),
-            triangle: Triangle::default(),
-        }
-    }
 }
 
 impl SdlApuDebugger {
@@ -50,11 +35,10 @@ impl SdlApuDebugger {
             _texture_creator: texture_creator,
             text_area: TextArea::new(),
             mode: 1,
-            apu_state: ApuState::default(),
         }
     }
 
-    pub fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
@@ -99,25 +83,11 @@ impl SdlApuDebugger {
         }
     }
 
-    pub fn update(&mut self, nes: &Nes) {
-        match self.mode {
-            1 => {
-                self.apu_state.pulse = nes.apu.pulse1.clone();
-            }
-            2 => {
-                self.apu_state.pulse = nes.apu.pulse2.clone();
-            }
-            3 => {
-                self.apu_state.triangle = nes.apu.triangle.clone();
-            }
-            _ => {}
-        }
-    }
-
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self, nes: &Nes) {
         self.canvas.clear();
         self.text_area.clear();
         let ta = &mut self.text_area;
+        let apu = &nes.apu;
 
         fn draw_pulse_data<const W: usize, const H: usize>(pulse: &Pulse, ta: &mut TextArea<W, H>) {
             ta.write_str_with_color("EN DIVIDER PERIOD", 1, 0, Blue);
@@ -212,15 +182,15 @@ impl SdlApuDebugger {
         match self.mode {
             1 => {
                 ta.write_str_with_color("PULSE 1", 0, 0, Yellow);
-                draw_pulse_data(&self.apu_state.pulse, ta);
+                draw_pulse_data(&apu.pulse1, ta);
             }
             2 => {
                 ta.write_str_with_color("PULSE 2", 0, 0, Yellow);
-                draw_pulse_data(&self.apu_state.pulse, ta);
+                draw_pulse_data(&apu.pulse2, ta);
             }
             3 => {
                 ta.write_str_with_color("TRIANGLE", 0, 0, Yellow);
-                draw_triangle_data(&self.apu_state.triangle, ta);
+                draw_triangle_data(&apu.triangle, ta);
             }
             _ => {}
         }

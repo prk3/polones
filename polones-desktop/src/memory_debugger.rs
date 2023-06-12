@@ -15,10 +15,6 @@ pub struct SdlMemoryDebugger {
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
     page_number: u16,
-    page: [u8; 256],
-    cpu_stack_pointer: u8,
-    cpu_program_counter: u16,
-    ppu_oam_address: u8,
 }
 
 impl SdlMemoryDebugger {
@@ -48,14 +44,10 @@ impl SdlMemoryDebugger {
             _texture_creator: texture_creator,
             text_area: TextArea::new(),
             page_number: 0,
-            page: [0; 256],
-            cpu_program_counter: 0,
-            cpu_stack_pointer: 0,
-            ppu_oam_address: 0,
         }
     }
 
-    pub fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         let page_ranges = [0x00..=0x19, 0x80..=0x140];
         match event {
             Event::Quit { .. } => {
@@ -101,43 +93,7 @@ impl SdlMemoryDebugger {
         }
     }
 
-    pub fn update(&mut self, nes: &mut Nes) {
-        match self.page_number {
-            0x00..=0xFF => {
-                let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
-                for y in 0..16 {
-                    for x in 0..16 {
-                        self.page[(y * 16) + x] =
-                            cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16);
-                    }
-                }
-                self.cpu_stack_pointer = cpu.stack_pointer;
-                self.cpu_program_counter = cpu.program_counter;
-            }
-            0x100..=0x13F => {
-                let (_, mut cpu_bus) = nes.split_into_cpu_and_bus();
-                let (_, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
-                for y in 0..16 {
-                    for x in 0..16 {
-                        self.page[(y * 16) + x] = ppu_bus
-                            .read(256 * (self.page_number - 0x100) + (y as u16 * 16) + x as u16);
-                    }
-                }
-            }
-            0x140 => {
-                let (_, cpu_bus) = nes.split_into_cpu_and_bus();
-                for y in 0..16 {
-                    for x in 0..16 {
-                        self.page[(y * 16) + x] = cpu_bus.ppu.oam[y as usize * 16 + x as usize];
-                    }
-                }
-                self.ppu_oam_address = cpu_bus.ppu.oam_address;
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self, nes: &mut Nes) {
         let ta = &mut self.text_area;
         ta.clear();
 
@@ -179,51 +135,78 @@ impl SdlMemoryDebugger {
             );
         }
 
-        for y in 0..16 {
-            for x in 0..16 {
+        match self.page_number {
+            0x00..=0xFF => {
+                let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                            3 + y as u8 * 2,
+                            1 + x as u8 * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+                if self.page_number == 0x01 {
+                    let y = cpu.stack_pointer >> 4;
+                    let x = cpu.stack_pointer & 0x0F;
+                    self.text_area.write_u8_with_color(
+                        cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                        3 + y * 2,
+                        1 + x * 3,
+                        Magenta,
+                    );
+                }
+                if self.page_number == cpu.program_counter & 0xFF00 {
+                    let y = cpu.program_counter as u8 >> 4;
+                    let x = cpu.program_counter as u8 & 0x0F;
+                    self.text_area.write_u8_with_color(
+                        cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                        3 + y * 2,
+                        1 + x * 3,
+                        Red,
+                    );
+                }
+            }
+            0x100..=0x13F => {
+                let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+                let (_ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            ppu_bus.read(
+                                256 * (self.page_number - 0x100) + (y as u16 * 16) + x as u16,
+                            ),
+                            3 + y * 2,
+                            1 + x * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+            }
+            0x140 => {
+                let ppu = &nes.ppu;
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            ppu.oam[(y as usize * 16) + x as usize],
+                            3 + y * 2,
+                            1 + x * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+                let y = ppu.oam_address >> 4;
+                let x = ppu.oam_address & 0x0F;
                 self.text_area.write_u8_with_color(
-                    self.page[(y * 16) + x],
-                    3 + y as u8 * 2,
-                    1 + x as u8 * 3,
-                    if x % 2 == 0 { White } else { Cyan },
+                    ppu.oam[(y as usize * 16) + x as usize],
+                    3 + y * 2,
+                    1 + x * 3,
+                    Magenta,
                 );
             }
-        }
-
-        if self.page_number == 0x01 {
-            let byte_number = self.cpu_stack_pointer;
-            let y = byte_number >> 4;
-            let x = byte_number & 0x0F;
-            self.text_area.write_u8_with_color(
-                self.page[byte_number as usize],
-                3 + y * 2,
-                1 + x * 3,
-                Magenta,
-            );
-        }
-
-        if self.page_number == self.cpu_program_counter & 0xFF00 {
-            let byte_number = self.cpu_program_counter as u8;
-            let y = byte_number >> 4;
-            let x = byte_number & 0x0F;
-            self.text_area.write_u8_with_color(
-                self.page[byte_number as usize],
-                3 + y * 2,
-                1 + x * 3,
-                Red,
-            );
-        }
-
-        if self.page_number == 0x140 {
-            let byte_number = self.ppu_oam_address;
-            let y = byte_number >> 4;
-            let x = byte_number & 0x0F;
-            self.text_area.write_u8_with_color(
-                self.page[byte_number as usize],
-                3 + y * 2,
-                1 + x * 3,
-                Magenta,
-            );
+            _ => unreachable!(),
         }
 
         self.texture

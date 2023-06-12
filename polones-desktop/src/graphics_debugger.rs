@@ -14,29 +14,6 @@ pub struct SdlGraphicsDebugger {
     mode: u8,
     grid: bool,
     pattern_palette: u8,
-    graphics_state: GraphicsState,
-}
-
-struct GraphicsState {
-    oam: [u8; 256],
-    palette: [u8; 32],
-    pattern_tables: [[u8; 4096]; 2],
-    nametables: [[u8; 1024]; 4],
-    background_tile_select: bool,
-    sprite_height: bool,
-}
-
-impl Default for GraphicsState {
-    fn default() -> Self {
-        Self {
-            oam: [0; 256],
-            palette: [0; 32],
-            pattern_tables: [[0; 4096]; 2],
-            nametables: [[0; 1024]; 4],
-            background_tile_select: false,
-            sprite_height: false,
-        }
-    }
 }
 
 impl SdlGraphicsDebugger {
@@ -59,11 +36,10 @@ impl SdlGraphicsDebugger {
             mode: 1,
             pattern_palette: 0,
             grid: false,
-            graphics_state: GraphicsState::default(),
         }
     }
 
-    pub fn handle_event(&mut self, event: Event, state: &mut EmulatorState) {
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
             Event::Quit { .. } => {
                 state.exit = true;
@@ -114,84 +90,42 @@ impl SdlGraphicsDebugger {
         }
     }
 
-    pub fn update(&mut self, nes: &mut Nes) {
-        let (_, mut cpu_bus) = nes.split_into_cpu_and_bus();
+    pub fn draw(&mut self, nes: &mut Nes) {
+        let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
 
-        let s = &mut self.graphics_state;
-
-        s.background_tile_select = ppu.control_register.get_background_tile_select();
-        s.sprite_height = ppu.control_register.get_sprite_height();
-
-        match self.mode {
-            1 | 2 => {
-                if s.background_tile_select {
-                    for i in 0..4096 {
-                        s.pattern_tables[1][i] = ppu_bus.read(0x1000 + i as u16);
-                    }
-                } else {
-                    for i in 0..4096 {
-                        s.pattern_tables[0][i] = ppu_bus.read(i as u16);
-                    }
-                }
-                for i in 0..1024 {
-                    s.nametables[0][i] = ppu_bus.read(0x2000 + i as u16);
-                }
-                for i in 0..1024 {
-                    s.nametables[1][i] = ppu_bus.read(0x2400 + i as u16);
-                }
-                for i in 0..1024 {
-                    s.nametables[2][i] = ppu_bus.read(0x2800 + i as u16);
-                }
-                for i in 0..1024 {
-                    s.nametables[3][i] = ppu_bus.read(0x2C00 + i as u16);
-                }
-                if self.mode == 1 {
-                    for i in 0..32 {
-                        s.palette[i] = ppu_bus.ppu_palette_ram.read(i);
-                    }
-                }
-            }
-            3 | 4 => {
-                for i in 0..4096 {
-                    s.pattern_tables[0][i] = ppu_bus.read(i as u16);
-                }
-                for i in 0..4096 {
-                    s.pattern_tables[1][i] = ppu_bus.read(0x1000 + i as u16);
-                }
-                for i in 0..256 {
-                    s.oam[i] = ppu.oam[i];
-                }
-                for i in 0..32 {
-                    s.palette[i] = ppu_bus.ppu_palette_ram.read(i);
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn draw(&mut self) {
-        let s = &mut self.graphics_state;
-
         if self.mode == 1 || self.mode == 2 {
-            let pt = s.background_tile_select as usize;
+            let nt = ppu.control_register.get_background_tile_select() as u16;
             self.texture
                 .with_lock(None, |data, _| {
                     // draw background from 4 nametables
-                    for yn in 0..2 {
-                        for xn in 0..2 {
-                            for yc in 0..30 {
-                                for yf in 0..8 {
-                                    for xc in 0..32 {
-                                        let index =
-                                            s.nametables[yn * 2 + xn][yc * 32 + xc] as usize;
-                                        let mut low = s.pattern_tables[pt]
-                                            [(index >> 0 << 4) | (0b0000) | (yf)];
-                                        let mut high = s.pattern_tables[pt]
-                                            [(index >> 0 << 4) | (0b1000) | (yf)];
-
-                                        let attribute_byte = s.nametables[yn * 2 + xn]
-                                            [0x3C0 | (yc >> 2 << 3) | (xc >> 2)];
+                    for yn in 0..2usize {
+                        for xn in 0..2usize {
+                            for yc in 0..30usize {
+                                for yf in 0..8usize {
+                                    for xc in 0..32usize {
+                                        let index = ppu_bus.read(
+                                            (0x2000 + yn * 0x0800 + xn * 0x0400 + yc * 32 + xc)
+                                                as u16,
+                                        );
+                                        let mut low = ppu_bus.read(
+                                            (nt << 12)
+                                                | (index as u16 >> 0 << 4)
+                                                | (0b0000)
+                                                | (yf as u16),
+                                        );
+                                        let mut high = ppu_bus.read(
+                                            (nt << 12)
+                                                | (index as u16 >> 0 << 4)
+                                                | (0b1000)
+                                                | (yf as u16),
+                                        );
+                                        let attribute_byte = ppu_bus.read(
+                                            ((0x23C0 + yn * 0x0800 + xn * 0x0400)
+                                                | (yc >> 2 << 3)
+                                                | (xc >> 2))
+                                                as u16,
+                                        );
                                         let attribute =
                                             (attribute_byte >> ((yc & 2) << 1) >> (xc & 2)) & 0b11;
 
@@ -205,11 +139,15 @@ impl SdlGraphicsDebugger {
 
                                             let (r, g, b) = if self.mode == 1 {
                                                 if ((high >> 7 << 1) | low >> 7) == 0 {
-                                                    PALLETTE[(s.palette[0]) as usize]
+                                                    PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111)
+                                                        as usize]
                                                 } else {
-                                                    let b = s.palette[((attribute as usize) << 2)
-                                                        + (((high as usize) >> 7 << 1)
-                                                            | low as usize >> 7)];
+                                                    let b = ppu_bus.read(
+                                                        0x3F00
+                                                            + ((attribute as u16) << 2)
+                                                            + (((high as u16) >> 7 << 1)
+                                                                | low as u16 >> 7),
+                                                    ) & 0b00111111;
                                                     PALLETTE[b as usize]
                                                 }
                                             } else {
@@ -244,14 +182,16 @@ impl SdlGraphicsDebugger {
                 .with_lock(None, |data, _pitch| {
                     // draw sprites from both pattern tables
                     // color is specified by self.pattern_palette
-                    for pt in 0..2 {
-                        for yc in 0..16 {
-                            for xc in 0..16 {
-                                for yf in 0..8 {
-                                    let mut low =
-                                        s.pattern_tables[pt][(yc << 8) | (xc << 4) | (0b0000) | yf];
-                                    let mut high =
-                                        s.pattern_tables[pt][(yc << 8) | (xc << 4) | (0b1000) | yf];
+                    for pt in 0..2usize {
+                        for yc in 0..16usize {
+                            for xc in 0..16usize {
+                                for yf in 0..8usize {
+                                    let mut low = ppu_bus.read(
+                                        ((pt << 12) | (yc << 8) | (xc << 4) | (0b0000) | yf) as u16,
+                                    );
+                                    let mut high = ppu_bus.read(
+                                        ((pt << 12) | (yc << 8) | (xc << 4) | (0b1000) | yf) as u16,
+                                    );
                                     for xf in 0..8 {
                                         let i: usize = pt * 256
                                             + yc * 512 * 8 * 2
@@ -261,12 +201,15 @@ impl SdlGraphicsDebugger {
 
                                         let (r, g, b) = if self.mode == 3 {
                                             if ((high >> 7 << 1) | low >> 7) == 0 {
-                                                PALLETTE[s.palette[0] as usize]
+                                                PALLETTE
+                                                    [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                             } else {
-                                                let b = s.palette[(self.pattern_palette as usize)
-                                                    << 2
-                                                    | ((high as usize) >> 7 << 1)
-                                                    | low as usize >> 7];
+                                                let b = ppu_bus.read(
+                                                    0x3F00
+                                                        + ((self.pattern_palette as u16) << 2)
+                                                        + (((high as u16) >> 7 << 1)
+                                                            | low as u16 >> 7),
+                                                ) & 0b00111111;
                                                 PALLETTE[b as usize]
                                             }
                                         } else {
@@ -320,29 +263,37 @@ impl SdlGraphicsDebugger {
                     }
 
                     // draw sprites in oam (if sprites are 8 pixels tall)
-                    if !s.sprite_height {
-                        let pt = !s.background_tile_select as usize;
-
-                        for yc in 0..8 {
-                            for yf in 0..8 {
-                                for xc in 0..8 {
-                                    let index = s.oam[(yc * 8 + xc) * 4 + 1];
-                                    let palette = s.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+                    if !ppu.control_register.get_sprite_height() {
+                        for yc in 0..8usize {
+                            for yf in 0..8usize {
+                                for xc in 0..8usize {
+                                    let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
+                                    let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+                                    let pt = ppu.control_register.get_sprite_tile_select() as u8;
                                     let tile = index;
 
-                                    let mut low = s.pattern_tables[pt]
-                                        [((tile as usize) << 4) | (0b0000) | yf];
-                                    let mut high = s.pattern_tables[pt]
-                                        [((tile as usize) << 4) | (0b1000) | yf];
+                                    let mut low = ppu_bus.read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b0000)
+                                            | yf as u16,
+                                    );
+                                    let mut high = ppu_bus.read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b1000)
+                                            | yf as u16,
+                                    );
 
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                                            PALLETTE[s.palette[0] as usize]
+                                            PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
-                                            let b = s.palette[0x10
-                                                | ((palette as usize) << 2)
-                                                | (((high as usize) >> 7 << 1)
-                                                    | low as usize >> 7)];
+                                            let b = ppu_bus.read(
+                                                0x3F10
+                                                    + ((palette as u16) << 2)
+                                                    + (((high as u16) >> 7 << 1) | low as u16 >> 7),
+                                            ) & 0b00111111;
                                             PALLETTE[b as usize]
                                         };
 
@@ -379,32 +330,41 @@ impl SdlGraphicsDebugger {
                     }
                     // draw sprites in oam (if sprites are 16 pixels tall)
                     else {
-                        for yc in 0..8 {
-                            for yf in 0..16 {
-                                for xc in 0..8 {
-                                    let index = s.oam[(yc * 8 + xc) * 4 + 1];
-                                    let palette = s.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
+                        for yc in 0..8usize {
+                            for yf in 0..16usize {
+                                for xc in 0..8usize {
+                                    let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
+                                    let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
 
-                                    let pt = (index & 1) as usize;
+                                    let pt = index & 1;
                                     let tile = if yf <= 7 {
                                         index & 0b11111110
                                     } else {
                                         index | 0b00000001
                                     };
 
-                                    let mut low = s.pattern_tables[pt]
-                                        [((tile as usize) << 4) | (0b0000) | (yf & 0b111)];
-                                    let mut high = s.pattern_tables[pt]
-                                        [((tile as usize) << 4) | (0b1000) | (yf & 0b111)];
+                                    let mut low = ppu_bus.read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b0000)
+                                            | (yf & 0b111) as u16,
+                                    );
+                                    let mut high = ppu_bus.read(
+                                        ((pt as u16) << 12)
+                                            | ((tile as u16) << 4)
+                                            | (0b1000)
+                                            | (yf & 0b111) as u16,
+                                    );
 
                                     for xf in 0..8usize {
                                         let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                                            PALLETTE[s.palette[0] as usize]
+                                            PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111) as usize]
                                         } else {
-                                            let b = s.palette[0x10
-                                                | ((palette as usize) << 2)
-                                                | (((high as usize) >> 7 << 1)
-                                                    | low as usize >> 7)];
+                                            let b = ppu_bus.read(
+                                                0x3F10
+                                                    + ((palette as u16) << 2)
+                                                    + (((high as u16) >> 7 << 1) | low as u16 >> 7),
+                                            ) & 0b00111111;
                                             PALLETTE[b as usize]
                                         };
 
@@ -459,10 +419,10 @@ impl SdlGraphicsDebugger {
                             }
                         }
 
-                        for yf in 0..8 {
-                            for xc in 0..4 {
-                                let byte = s.palette[(yc << 2) | xc];
-                                let (r, g, b) = PALLETTE[byte as usize];
+                        for yf in 0..8usize {
+                            for xc in 0..4usize {
+                                let byte = ppu_bus.read(0x3F00 | ((yc as u16) << 2) | xc as u16);
+                                let (r, g, b) = PALLETTE[byte as usize & 0b00111111];
                                 for xf in 0..8 {
                                     let i = (512 * 8)
                                         + (256 + 24)

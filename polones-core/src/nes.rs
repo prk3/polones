@@ -1,4 +1,4 @@
-use crate::apu::{Apu, AudioSample, AUDIO_BATCH_SIZE};
+use crate::apu::Apu;
 use crate::cpu::Cpu;
 use crate::game_file::GameFile;
 use crate::io::Io;

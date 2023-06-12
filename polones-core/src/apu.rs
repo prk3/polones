@@ -2,7 +2,7 @@ use crate::cpu::Cpu;
 use crate::nes::Peripherals;
 
 pub type AudioSample = u16;
-pub const AUDIO_BATCH_SIZE: usize = 64;
+pub const AUDIO_BATCH_SIZE: usize = 1024 * 16;
 
 const LENGTH_COUNTER_TABLE: [u8; 32] = [
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
@@ -350,7 +350,7 @@ pub struct Apu {
     pub frame_counter_interrupt_inhibit: bool,
     pub frame_counter: u16,
 
-    samples: Vec<u16>,
+    samples: Vec<AudioSample>,
 }
 
 impl Apu {
@@ -370,7 +370,7 @@ impl Apu {
             frame_counter_interrupt_inhibit: false,
             frame_counter: 0,
 
-            samples: Vec::with_capacity(1024 * 16),
+            samples: Vec::with_capacity(AUDIO_BATCH_SIZE),
         }
     }
 
@@ -638,46 +638,24 @@ impl Apu {
         let noise_sample = self.noise.volume();
         let dmc_sample = 0;
 
-        let mix = PULSE_MIX_TABLE
-            [(pulse1_sample + pulse2_sample) as usize]
-            + OTHER_MIX_TABLE[3 * triangle_sample as usize
-                + 2 * noise_sample as usize
-                + dmc_sample as usize];
+        let mix = PULSE_MIX_TABLE[(pulse1_sample + pulse2_sample) as usize]
+            + OTHER_MIX_TABLE
+                [3 * triangle_sample as usize + 2 * noise_sample as usize + dmc_sample as usize];
 
         self.samples.push(mix);
 
-        if self.samples.len() == 1024 * 16 {
+        if self.samples.len() == AUDIO_BATCH_SIZE {
             peripherals.audio.version = peripherals.audio.version.wrapping_add(1);
             std::mem::swap(&mut peripherals.audio.samples, &mut self.samples);
             self.samples.clear();
-            self.samples.reserve(1024 * 16);
+            self.samples.reserve(AUDIO_BATCH_SIZE);
         }
 
         self.cpu_cycle_odd = !self.cpu_cycle_odd;
     }
 
     // Removes all generated samples.
-    // pub fn clear_samples(&mut self) {
-    //     self.pulse1_samples.clear();
-    //     self.pulse2_samples.clear();
-    //     self.triangle_samples.clear();
-    //     self.noise_samples.clear();
-    // }
+    pub fn clear_samples(&mut self) {
+        self.samples.clear();
+    }
 }
-
-// fn print_triangle_samples(s: &Vec<u8>) {
-//     println!("samples:");
-//     let mut last_value = 0;
-//     let mut count = 1;
-
-//     for i in s {
-//         if *i == last_value {
-//             count += 1;
-//         } else {
-//             println!("v={i}, times={count}");
-//             last_value = *i;
-//             count = 1;
-//         }
-//     }
-//     println!("v={last_value}, times={count}");
-// }

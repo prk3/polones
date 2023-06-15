@@ -6,6 +6,7 @@ import { InputMapping, InputMappings } from './types';
 import { PolonesWebContext } from './PolonesWebProvider';
 import { InputContext, InputTools } from './InputProvider';
 import useRefreshRateRef from './useRefreshRate';
+import { polones_get_audio_samples } from 'polones-web';
 
 const DEFAULT_MAPPINGS: InputMappings = {
   port1: {
@@ -37,7 +38,7 @@ export default function Emulator() {
   const [wasRunningBeforeInputScreen, setWasRunningBeforeInputScreen] = React.useState(false);
   const refreshRateRef = useRefreshRateRef();
   const audioContextRef = React.useRef<AudioContext | null>(null);
-  const audioBufferSourceNodeRef = React.useRef<AudioBufferSourceNode | null>(null);
+  const audioNodeRef = React.useRef<AudioWorkletNode | null>(null);
 
   function onresize(_event: UIEvent) {
     setViewportSize([
@@ -77,7 +78,7 @@ export default function Emulator() {
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    // startAudioContext();
+    startAudioContext();
 
     let file: File | undefined = undefined;
 
@@ -118,34 +119,43 @@ export default function Emulator() {
     }
   }
 
-  // function startAudioContext() {
-  //   if (audioContextRef.current == null) {
-  //     let audioCtx = new AudioContext();
-  //     let buffer = audioCtx.createBuffer(1, 44_100 * 3, 44_100);
-  //     let source = audioCtx.createBufferSource();
+  function startAudioContext() {
+    if (audioContextRef.current == null) {
+      let audioCtx = new AudioContext();
 
-  //     let data = new Float32Array(3 * 44_100);
-  //     for (let i = 0; i < 3 * 44_100; i++) {
-  //       data[i] = Math.random() * 2 - 1;
-  //     }
-  //     buffer.copyToChannel(data, 0, 0);
-
-  //     source.buffer = buffer;
-  //     source.connect(audioCtx.destination);
-  //     source.start();
-
-  //     audioContextRef.current = audioCtx;
-  //     audioBufferSourceNodeRef.current = source;
-  //   }
-  // }
+      audioCtx.audioWorklet.addModule(window.location.href + (window.location.href.endsWith('/') ? '' : '/') + 'AudioProcessor.js').then(() => {
+        let audioNode = new AudioWorkletNode(audioCtx, "polones-audio-processor");
+        audioNode.connect(audioCtx.destination);
+        audioNodeRef.current = audioNode;
+      }).catch(error => {
+        console.error("Could not load polones audio processor module", error);
+      });
+    }
+  }
 
   function startEmulation() {
     function runTicksForOneFrame() {
       try {
         const port1 = inputStateStringFromMapping(inputMappingsRef.current.port1, input);
         const port2 = inputStateStringFromMapping(inputMappingsRef.current.port2, input);
+
         polones.polones_set_input(port1, port2);
-        polones.polones_tick(Math.floor(60 * 29780.5 / refreshRateRef.current));
+
+        const ticksToRun = Math.floor(60 * 29780.5 / refreshRateRef.current);
+        let ticksRun = 0;
+
+        while (ticksRun < ticksToRun) {
+          const ticksThisIteration = Math.min(ticksToRun - ticksRun, 5000);
+          polones.polones_tick(ticksThisIteration);
+          ticksRun += ticksThisIteration;
+
+          const samples = polones_get_audio_samples();
+
+          if (samples) {
+            audioNodeRef.current?.port.postMessage(samples, [samples.buffer]);
+          }
+        }
+
         const frame = polones.polones_get_video_frame();
         if (frame) {
           canvasRef

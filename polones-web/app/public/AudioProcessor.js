@@ -34,7 +34,7 @@ class RingBuffer {
   pushBack(data) {
     let bytesCopied = 0;
     while (bytesCopied < data.byteLength) {
-      const end = this.start + this.length % this.buffer.byteLength;
+      const end = (this.start + this.length) % this.buffer.byteLength;
       const copyLength = Math.min(data.byteLength - bytesCopied, this.buffer.byteLength - end);
       new Uint8Array(this.buffer, end, copyLength).set(new Uint8Array(data, bytesCopied, copyLength), 0);
       bytesCopied += copyLength;

@@ -126,6 +126,9 @@ export default function Emulator() {
       audioCtx.audioWorklet.addModule(window.location.href + (window.location.href.endsWith('/') ? '' : '/') + 'AudioProcessor.js').then(() => {
         let audioNode = new AudioWorkletNode(audioCtx, "polones-audio-processor");
         audioNode.connect(audioCtx.destination);
+        audioNode.onprocessorerror = (error) => {
+          console.error("polones audio processor errored", error);
+        };
         audioNodeRef.current = audioNode;
       }).catch(error => {
         console.error("Could not load polones audio processor module", error);

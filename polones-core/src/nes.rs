@@ -108,7 +108,7 @@ pub struct Nes {
     pub apu: Apu,
     pub io: Io,
     pub ppu: Ppu,
-    pub mapper: Box<dyn Mapper + Send + 'static>,
+    pub mapper: Box<dyn Mapper>,
     pub cpu_ram: Ram<{ 2 * 1024 }>,
     pub ppu_nametable_ram: Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: Ram<32>,
@@ -254,7 +254,7 @@ pub struct CpuBus<'a> {
     pub apu: &'a mut Apu,
     pub io: &'a mut Io,
     pub ppu: &'a mut Ppu,
-    pub mapper: &'a mut Box<dyn Mapper + Send + 'static>,
+    pub mapper: &'a mut Box<dyn Mapper>,
     pub cpu_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_nametable_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: &'a mut Ram<32>,
@@ -324,7 +324,7 @@ impl<'a> CpuBus<'a> {
 }
 
 pub struct PpuBus<'a> {
-    pub mapper: &'a mut Box<dyn Mapper + Send + 'static>,
+    pub mapper: &'a mut Box<dyn Mapper>,
     pub ppu_nametable_ram: &'a mut Ram<{ 2 * 1024 }>,
     pub ppu_palette_ram: &'a mut Ram<32>,
 }

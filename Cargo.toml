@@ -4,6 +4,5 @@ members = [
   "polones-test",
   "polones-core",
   "polones-desktop",
-  "polones-web",
-  "vis"
+  "polones-web"
 ]

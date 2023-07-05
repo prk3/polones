@@ -39,6 +39,7 @@ export default function Emulator() {
   const refreshRateRef = useRefreshRateRef();
   const audioContextRef = React.useRef<AudioContext | null>(null);
   const audioNodeRef = React.useRef<AudioWorkletNode | null>(null);
+  const [audioBlocked, setAudioBlocked] = React.useState(false);
 
   function onresize(_event: UIEvent) {
     setViewportSize([
@@ -70,22 +71,20 @@ export default function Emulator() {
 
   React.useEffect(() => {
     window.addEventListener('resize', onresize);
-
     return () => {
       window.removeEventListener('resize', onresize);
     }
-  }, [input]);
+  }, []);
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    startAudioContext();
 
     let file: File | undefined = undefined;
 
     if (event.dataTransfer.items) {
       for (const item of event.dataTransfer.items) {
         if (item.kind === 'file') {
-          let f = item.getAsFile();
+          const f = item.getAsFile();
           if (f) {
             file = f;
             break;
@@ -106,10 +105,12 @@ export default function Emulator() {
             polones.polones_init(new Uint8Array(rom));
             setError(null);
             setState('running');
+            startAudio();
             startEmulation();
           } catch (error) {
             setError(error as string);
             setState('rom');
+            stopAudio();
             stopEmulation();
           }
         })
@@ -119,9 +120,17 @@ export default function Emulator() {
     }
   }
 
-  function startAudioContext() {
-    if (audioContextRef.current == null) {
-      let audioCtx = new AudioContext();
+  function startAudio() {
+    if (audioContextRef.current === null) {
+      let audioCtx = new AudioContext({
+        sampleRate: 44_100,
+      });
+      setAudioBlocked(true);
+      audioCtx.onstatechange = () => {
+        if (audioCtx.state === 'running') {
+          setAudioBlocked(false);
+        }
+      };
 
       audioCtx.audioWorklet.addModule(window.location.href + (window.location.href.endsWith('/') ? '' : '/') + 'AudioProcessor.js').then(() => {
         let audioNode = new AudioWorkletNode(audioCtx, "polones-audio-processor");
@@ -129,10 +138,30 @@ export default function Emulator() {
         audioNode.onprocessorerror = (error) => {
           console.error("polones audio processor errored", error);
         };
+
+        audioContextRef.current = audioCtx;
         audioNodeRef.current = audioNode;
       }).catch(error => {
         console.error("Could not load polones audio processor module", error);
       });
+    }
+  }
+
+  function stopAudio() {
+    if (audioContextRef.current !== null) {
+      audioContextRef.current.close()
+        .catch(e => {
+          console.error("Could not stop audio context", e)
+        });
+      audioContextRef.current = null;
+      audioNodeRef.current = null;
+    }
+  }
+
+  function handleUnblockAudio() {
+    if (audioBlocked && audioContextRef.current !== null) {
+      stopAudio();
+      startAudio();
     }
   }
 
@@ -168,6 +197,7 @@ export default function Emulator() {
         }
         emulationLoopRef.current = window.requestAnimationFrame(runTicksForOneFrame);
       } catch (e) {
+        stopAudio();
         stopEmulation();
         console.error(e);
       }
@@ -187,6 +217,7 @@ export default function Emulator() {
 
   function handlePauseClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'running') {
+      stopAudio();
       stopEmulation();
       setState('paused');
     }
@@ -194,6 +225,7 @@ export default function Emulator() {
 
   function handleUnpauseClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'paused') {
+      startAudio();
       startEmulation();
       setState('running');
     }
@@ -201,6 +233,7 @@ export default function Emulator() {
 
   function handleStopClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state !== 'rom') {
+      stopAudio();
       stopEmulation();
       setState('rom');
     }
@@ -208,6 +241,7 @@ export default function Emulator() {
 
   function handleInputScreenClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'running') {
+      stopAudio();
       stopEmulation();
       setState('paused');
       setWasRunningBeforeInputScreen(true);
@@ -226,13 +260,14 @@ export default function Emulator() {
   function handleInputScreenClose() {
     setInputScreenVisible(false);
     if (wasRunningBeforeInputScreen && state === 'paused') {
+      startAudio();
       startEmulation();
       setState('running');
     }
   }
 
-  let viewportRatio = viewportSize[0] / viewportSize[1];
-  let canvasRatio = 256 / 240;
+  const viewportRatio = viewportSize[0] / viewportSize[1];
+  const canvasRatio = 256 / 240;
   let zoom: number;
   if (viewportRatio > canvasRatio) {
     // --------------
@@ -251,7 +286,7 @@ export default function Emulator() {
     // --------
     zoom = viewportSize[0] / 256;
   }
-  let transform = `scale(${zoom})`;
+  const transform = `scale(${zoom})`;
 
   return (
     <div className="App">
@@ -277,6 +312,9 @@ export default function Emulator() {
           )}
           {state !== 'rom' && (
             <button type="button" onClick={handleStopClick}>×</button>
+          )}
+          {audioBlocked && (
+            <button type="button" onClick={handleUnblockAudio}>🔊</button>
           )}
           <button type="button" onClick={handleInputScreenClick}>🎮</button>
         </aside>

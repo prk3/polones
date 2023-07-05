@@ -44,21 +44,23 @@ export default function InputScreen({
 
   return (
     <div className="inputScreenContainer">
-      <PortInput
-        name="1"
-        remapping={remapping}
-        setRemapping={setRemapping}
-        inputMapping={inputMappings.port1}
-        onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port1: im })}
-      />
-      <PortInput
-        name="2"
-        remapping={remapping}
-        setRemapping={setRemapping}
-        inputMapping={inputMappings.port2}
-        onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port2: im })}
-      />
-      <button type="button" onClick={onClose}>CLOSE</button>
+      <div className="inputScreenModal">
+        <button type="button" className="closeButton" onClick={onClose}>✕</button>
+        <PortInput
+          name="1"
+          remapping={remapping}
+          setRemapping={setRemapping}
+          inputMapping={inputMappings.port1}
+          onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port1: im })}
+        />
+        <PortInput
+          name="2"
+          remapping={remapping}
+          setRemapping={setRemapping}
+          inputMapping={inputMappings.port2}
+          onInputMappingChange={im => onInputMappingsChange?.({ ...inputMappings, port2: im })}
+        />
+      </div>
     </div>
   );
 }

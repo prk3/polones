@@ -6,5 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sdl2 = "0.35.1"
+clap = { version = "4.0.23", features = ["derive"] }
+sdl2 = "0.35.2"
 polones-core = { path = "../polones-core" }
+parking_lot = "0.12.1"

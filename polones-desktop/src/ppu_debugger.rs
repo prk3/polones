@@ -35,13 +35,26 @@ impl SdlPpuDebugger {
         }
     }
 
-    pub fn show(&mut self, nes: &mut Nes) {
-        let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
-        let (ppu, _ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
+        match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Escape),
+                ..
+            } => {
+                state.exit = true;
+            }
+            _ => {}
+        }
+    }
 
+    pub fn draw(&mut self, nes: &mut Nes) {
         self.canvas.clear();
         self.text_area.clear();
         let ta = &mut self.text_area;
+        let ppu = &nes.ppu;
 
         ta.write_str_with_color("SCANLINE", 0, 0, Yellow);
         ta.write_u16_with_color(ppu.scanline, 0, 9, White);
@@ -91,7 +104,12 @@ impl SdlPpuDebugger {
         ta.write_bool_with_color(ppu.control_register.get_increment_mode(), 9, 7, White);
 
         ta.write_str_with_color("NTADDR", 10, 0, Yellow);
-        ta.write_u8_with_color(ppu.control_register.get_name_table_address(), 10, 7, White);
+        ta.write_u8_with_color(
+            ppu.control_register.get_name_table_address(),
+            10,
+            7,
+            White,
+        );
 
         ta.write_str_with_color("MASK", 3, 11, Yellow);
 
@@ -135,7 +153,12 @@ impl SdlPpuDebugger {
         ta.write_bool_with_color(ppu.status_register.get_sprite_0_hit_flag(), 5, 25, White);
 
         ta.write_str_with_color("S OVER", 6, 18, Yellow);
-        ta.write_bool_with_color(ppu.status_register.get_sprite_overflow_flag(), 6, 25, White);
+        ta.write_bool_with_color(
+            ppu.status_register.get_sprite_overflow_flag(),
+            6,
+            25,
+            White,
+        );
 
         ta.write_str_with_color("OAM ADDR", 8, 18, Yellow);
         ta.write_u8_with_color(ppu.oam_address, 8, 27, White);
@@ -173,20 +196,5 @@ impl SdlPpuDebugger {
             )
             .unwrap();
         self.canvas.present();
-    }
-
-    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
-        match event {
-            Event::Quit { .. } => {
-                state.exit = true;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Escape),
-                ..
-            } => {
-                state.exit = true;
-            }
-            _ => {}
-        }
     }
 }

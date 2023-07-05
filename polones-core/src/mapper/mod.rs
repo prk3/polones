@@ -5,6 +5,8 @@ mod mapper_001;
 mod mapper_002;
 mod mapper_003;
 
+type DynMapper = Box<dyn Mapper + Send + 'static>;
+
 pub trait Mapper {
     fn from_game(game: GameFile) -> Result<Self, &'static str>
     where
@@ -18,20 +20,20 @@ pub trait Mapper {
     fn ppu_nametable_address_mapped(&self, address: u16) -> u16;
 }
 
-pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper>, &'static str> {
+pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper + Send + 'static>, &'static str> {
     match (game.mapper, game.submapper) {
         (0, _) => {
-            mapper_000::Mapper000::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
+            mapper_000::Mapper000::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
         }
         (1, Some(5)) => Err("unsupported mapper"), // todo mapper 155
         (1, _) => {
-            mapper_001::Mapper001::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
+            mapper_001::Mapper001::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
         }
         (2, _) => {
-            mapper_002::Mapper002::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
+            mapper_002::Mapper002::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
         }
         (3, _) => {
-            mapper_003::Mapper003::from_game(game).map(|mapper| Box::new(mapper) as Box<dyn Mapper>)
+            mapper_003::Mapper003::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
         }
         _ => Err("unsupported mapper"),
     }

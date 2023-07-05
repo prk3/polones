@@ -41,12 +41,11 @@ impl Cpu {
             program_counter: 0,
             stack_pointer: 0xFD,
             status_register: {
-                let mut s = StatusRegister::new();
+                let mut s = StatusRegister::default();
                 s.set_interrupt(true);
                 s.set_ignored(true);
                 s
             },
-
             opcode: 0,
             sleep_cycles: 0,
             operand_address: 0,
@@ -104,7 +103,7 @@ impl Cpu {
     }
 
     pub fn irq(&mut self) {
-        if self.status_register.get_interrupt() {
+        if !self.status_register.get_interrupt() {
             self.irq_requested = true;
         }
     }
@@ -1993,7 +1992,7 @@ fn u16_address_offset(address: u16, by: i8) -> u16 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(transparent)]
 pub struct StatusRegister(u8);
 
@@ -2009,9 +2008,6 @@ macro_rules! flag_methods {
 }
 
 impl StatusRegister {
-    fn new() -> Self {
-        Self(0)
-    }
     flag_methods!(get_negative, set_negative, 7);
     flag_methods!(get_overflow, set_overflow, 6);
     flag_methods!(get_ignored, set_ignored, 5);

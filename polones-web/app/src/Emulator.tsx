@@ -5,14 +5,8 @@ import './Emulator.css';
 import { InputMapping, InputMappings } from './types';
 import { PolonesWebContext } from './PolonesWebProvider';
 import { InputContext, InputTools } from './InputProvider';
-
-declare global {
-  interface Window {
-    polones_display_draw(frame: Uint8ClampedArray): void,
-    polones_input_read_port_1(): string,
-    polones_input_read_port_2(): string,
-  }
-}
+import useRefreshRateRef from './useRefreshRate';
+import { polones_get_audio_samples } from 'polones-web';
 
 const DEFAULT_MAPPINGS: InputMappings = {
   port1: {
@@ -29,8 +23,8 @@ export default function Emulator() {
 
   const [error, setError] = React.useState<string | null>(null);
   const [viewportSize, setViewportSize] = React.useState<[number, number]>([
-    window.visualViewport.width,
-    window.visualViewport.height
+    window.visualViewport?.width ?? 1280,
+    window.visualViewport?.height ?? 720,
   ]);
   const [state, setState] = React.useState<'rom' | 'running' | 'paused'>('rom');
   const [inputMappings, setInputMappings] = React.useState<InputMappings>((() => {
@@ -38,15 +32,19 @@ export default function Emulator() {
     return inputMappings ? JSON.parse(inputMappings) : DEFAULT_MAPPINGS;
   })());
   const inputMappingsRef = React.useRef<InputMappings>(inputMappings);
-  const [gameInterval, setGameInterval] = React.useState<number | null>();
+  const emulationLoopRef = React.useRef<number | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [inputScreenVisible, setInputScreenVisible] = React.useState(false);
   const [wasRunningBeforeInputScreen, setWasRunningBeforeInputScreen] = React.useState(false);
+  const refreshRateRef = useRefreshRateRef();
+  const audioContextRef = React.useRef<AudioContext | null>(null);
+  const audioNodeRef = React.useRef<AudioWorkletNode | null>(null);
+  const [audioBlocked, setAudioBlocked] = React.useState(false);
 
   function onresize(_event: UIEvent) {
     setViewportSize([
-      window.visualViewport.width,
-      window.visualViewport.height,
+      window.visualViewport?.width ?? 1280,
+      window.visualViewport?.height ?? 720,
     ]);
   }
 
@@ -73,27 +71,10 @@ export default function Emulator() {
 
   React.useEffect(() => {
     window.addEventListener('resize', onresize);
-
-    window.polones_display_draw = function polones_display_draw(frame: Uint8ClampedArray) {
-      canvasRef
-        .current
-        ?.getContext('2d')
-        ?.putImageData(new ImageData(frame, 256, 240), 0, 0);
-    };
-
-    window.polones_input_read_port_1 = function polones_input_read_port_1() {
-      return inputStateStringFromMapping(inputMappingsRef.current.port1, input);
-    };
-
-    window.polones_input_read_port_2 = function polones_input_read_port_1() {
-      return inputStateStringFromMapping(inputMappingsRef.current.port2, input);
-    };
-
     return () => {
       window.removeEventListener('resize', onresize);
-      // TODO clear the rest of the stuff
     }
-  }, [input]);
+  }, []);
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -103,7 +84,7 @@ export default function Emulator() {
     if (event.dataTransfer.items) {
       for (const item of event.dataTransfer.items) {
         if (item.kind === 'file') {
-          let f = item.getAsFile();
+          const f = item.getAsFile();
           if (f) {
             file = f;
             break;
@@ -120,15 +101,17 @@ export default function Emulator() {
     if (file) {
       file.arrayBuffer()
         .then(rom => {
-          let error = polones.polones_start(new Uint8Array(rom));
-          if (error) {
-            setError(error);
-            setState('rom');
-            setGameInterval(null);
-          } else {
+          try {
+            polones.polones_init(new Uint8Array(rom));
             setError(null);
             setState('running');
-            setGameInterval(startInterval());
+            startAudio();
+            startEmulation();
+          } catch (error) {
+            setError(error as string);
+            setState('rom');
+            stopAudio();
+            stopEmulation();
           }
         })
         .catch(error => setError(error));
@@ -137,17 +120,95 @@ export default function Emulator() {
     }
   }
 
-  function startInterval(): number {
-    const ref = { current: 0 };
-    ref.current = window.setInterval(function runTicksForOneFrame() {
+  function startAudio() {
+    if (audioContextRef.current === null) {
+      let audioCtx = new AudioContext({
+        sampleRate: 44_100,
+      });
+      setAudioBlocked(true);
+      audioCtx.onstatechange = () => {
+        if (audioCtx.state === 'running') {
+          setAudioBlocked(false);
+        }
+      };
+
+      audioCtx.audioWorklet.addModule(window.location.href + (window.location.href.endsWith('/') ? '' : '/') + 'AudioProcessor.js').then(() => {
+        let audioNode = new AudioWorkletNode(audioCtx, "polones-audio-processor");
+        audioNode.connect(audioCtx.destination);
+        audioNode.onprocessorerror = (error) => {
+          console.error("polones audio processor errored", error);
+        };
+
+        audioContextRef.current = audioCtx;
+        audioNodeRef.current = audioNode;
+      }).catch(error => {
+        console.error("Could not load polones audio processor module", error);
+      });
+    }
+  }
+
+  function stopAudio() {
+    if (audioContextRef.current !== null) {
+      audioContextRef.current.close()
+        .catch(e => {
+          console.error("Could not stop audio context", e)
+        });
+      audioContextRef.current = null;
+      audioNodeRef.current = null;
+    }
+  }
+
+  function handleUnblockAudio() {
+    if (audioBlocked && audioContextRef.current !== null) {
+      stopAudio();
+      startAudio();
+    }
+  }
+
+  function startEmulation() {
+    function runTicksForOneFrame() {
       try {
-          polones.polones_tick(29829);
+        const port1 = inputStateStringFromMapping(inputMappingsRef.current.port1, input);
+        const port2 = inputStateStringFromMapping(inputMappingsRef.current.port2, input);
+
+        polones.polones_set_input(port1, port2);
+
+        const ticksToRun = Math.floor(60 * 29780.5 / refreshRateRef.current);
+        let ticksRun = 0;
+
+        while (ticksRun < ticksToRun) {
+          const ticksThisIteration = Math.min(ticksToRun - ticksRun, 5000);
+          polones.polones_tick(ticksThisIteration);
+          ticksRun += ticksThisIteration;
+
+          const samples = polones_get_audio_samples();
+
+          if (samples) {
+            audioNodeRef.current?.port.postMessage(samples, [samples.buffer]);
+          }
+        }
+
+        const frame = polones.polones_get_video_frame();
+        if (frame) {
+          canvasRef
+            .current
+            ?.getContext('2d')
+            ?.putImageData(new ImageData(new Uint8ClampedArray(frame), 256, 240), 0, 0);
+        }
+        emulationLoopRef.current = window.requestAnimationFrame(runTicksForOneFrame);
       } catch (e) {
-        window.clearInterval(ref.current);
+        stopAudio();
+        stopEmulation();
         console.error(e);
       }
-    }, 1000/60);
-    return ref.current;
+    }
+    emulationLoopRef.current = window.requestAnimationFrame(runTicksForOneFrame);
+  }
+
+  function stopEmulation() {
+    if (emulationLoopRef.current !== null) {
+      window.cancelAnimationFrame(emulationLoopRef.current);
+    }
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
@@ -156,31 +217,32 @@ export default function Emulator() {
 
   function handlePauseClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'running') {
-      window.clearInterval(gameInterval!);
-      setGameInterval(null);
+      stopAudio();
+      stopEmulation();
       setState('paused');
     }
   }
 
   function handleUnpauseClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'paused') {
-      setGameInterval(startInterval());
+      startAudio();
+      startEmulation();
       setState('running');
     }
   }
 
   function handleStopClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state !== 'rom') {
-      window.clearInterval(gameInterval!);
-      setGameInterval(null);
+      stopAudio();
+      stopEmulation();
       setState('rom');
     }
   }
 
   function handleInputScreenClick(_event: MouseEvent<HTMLButtonElement>) {
     if (state === 'running') {
-      window.clearInterval(gameInterval!);
-      setGameInterval(null);
+      stopAudio();
+      stopEmulation();
       setState('paused');
       setWasRunningBeforeInputScreen(true);
     } else {
@@ -198,13 +260,14 @@ export default function Emulator() {
   function handleInputScreenClose() {
     setInputScreenVisible(false);
     if (wasRunningBeforeInputScreen && state === 'paused') {
-      setGameInterval(startInterval());
+      startAudio();
+      startEmulation();
       setState('running');
     }
   }
 
-  let viewportRatio = viewportSize[0] / viewportSize[1];
-  let canvasRatio = 256 / 240;
+  const viewportRatio = viewportSize[0] / viewportSize[1];
+  const canvasRatio = 256 / 240;
   let zoom: number;
   if (viewportRatio > canvasRatio) {
     // --------------
@@ -223,7 +286,7 @@ export default function Emulator() {
     // --------
     zoom = viewportSize[0] / 256;
   }
-  let transform = `scale(${zoom})`;
+  const transform = `scale(${zoom})`;
 
   return (
     <div className="App">
@@ -249,6 +312,9 @@ export default function Emulator() {
           )}
           {state !== 'rom' && (
             <button type="button" onClick={handleStopClick}>×</button>
+          )}
+          {audioBlocked && (
+            <button type="button" onClick={handleUnblockAudio}>🔊</button>
           )}
           <button type="button" onClick={handleInputScreenClick}>🎮</button>
         </aside>

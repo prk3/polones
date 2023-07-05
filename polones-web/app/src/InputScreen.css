@@ -4,8 +4,25 @@
   right: 0;
   top: 0;
   bottom: 0;
-  background-color: rgb(233, 233, 233);
-  color: black;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+}
+
+.inputScreenModal {
+  position: relative;
+
+  width: 100%;
+  height: 100%;
+
+  max-width: 600px;
+  max-height: 400px;
+
+  background-color: rgb(38, 38, 38);
+  border-radius: 40px;
+  padding: 40px;
 }
 
 .gamepad {
@@ -86,4 +103,14 @@
 .highlight {
   border-color: red;
   background-color: red;
+}
+
+.closeButton {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  border-radius: 20px;
 }

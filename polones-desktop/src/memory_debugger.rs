@@ -14,7 +14,7 @@ pub struct SdlMemoryDebugger {
     _texture_creator: Rc<sdl2::render::TextureCreator<WindowContext>>,
     texture: sdl2::render::Texture<'static>,
     text_area: TextArea<{ Self::WIDTH as usize / 8 }, { Self::HEIGHT as usize / 8 }>,
-    page: u16,
+    page_number: u16,
 }
 
 impl SdlMemoryDebugger {
@@ -43,23 +43,68 @@ impl SdlMemoryDebugger {
             texture: unsafe { std::mem::transmute(texture) },
             _texture_creator: texture_creator,
             text_area: TextArea::new(),
-            page: 0,
+            page_number: 0,
         }
     }
 
-    pub fn show(&mut self, nes: &mut Nes) {
-        let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
+        let page_ranges = [0x00..=0x19, 0x80..=0x140];
+        match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Escape),
+                ..
+            } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Up),
+                ..
+            } => {
+                self.page_number = increase_in_ranges(&page_ranges, self.page_number);
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Down),
+                ..
+            } => {
+                self.page_number = decrease_in_ranges(&page_ranges, self.page_number);
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::C),
+                ..
+            } => {
+                self.page_number = 0x00;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::P),
+                ..
+            } => {
+                self.page_number = 0x100;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::O),
+                ..
+            } => {
+                self.page_number = 0x140;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn draw(&mut self, nes: &mut Nes) {
         let ta = &mut self.text_area;
         ta.clear();
 
-        match self.page {
+        match self.page_number {
             0x00..=0xFF => {
                 ta.write_str_with_color("CPU BUS", 0, 0, Yellow);
-                ta.write_u16_with_color(256 * self.page, 0, 8, White);
+                ta.write_u16_with_color(256 * self.page_number, 0, 8, White);
             }
             0x100..=0x13F => {
                 ta.write_str_with_color("PPU BUS", 0, 0, Yellow);
-                ta.write_u16_with_color(256 * (self.page - 0x100), 0, 8, White);
+                ta.write_u16_with_color(256 * (self.page_number - 0x100), 0, 8, White);
             }
             0x140 => {
                 ta.write_str_with_color("OAM", 0, 0, Yellow);
@@ -90,55 +135,78 @@ impl SdlMemoryDebugger {
             );
         }
 
-        for y in 0..16u8 {
-            for x in 0..16u8 {
+        match self.page_number {
+            0x00..=0xFF => {
+                let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                            3 + y as u8 * 2,
+                            1 + x as u8 * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+                if self.page_number == 0x01 {
+                    let y = cpu.stack_pointer >> 4;
+                    let x = cpu.stack_pointer & 0x0F;
+                    self.text_area.write_u8_with_color(
+                        cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                        3 + y * 2,
+                        1 + x * 3,
+                        Magenta,
+                    );
+                }
+                if self.page_number == cpu.program_counter & 0xFF00 {
+                    let y = cpu.program_counter as u8 >> 4;
+                    let x = cpu.program_counter as u8 & 0x0F;
+                    self.text_area.write_u8_with_color(
+                        cpu_bus.read((256 * self.page_number) + (y as u16 * 16) + x as u16),
+                        3 + y * 2,
+                        1 + x * 3,
+                        Red,
+                    );
+                }
+            }
+            0x100..=0x13F => {
+                let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
+                let (_ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            ppu_bus.read(
+                                256 * (self.page_number - 0x100) + (y as u16 * 16) + x as u16,
+                            ),
+                            3 + y * 2,
+                            1 + x * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+            }
+            0x140 => {
+                let ppu = &nes.ppu;
+                for y in 0..16 {
+                    for x in 0..16 {
+                        self.text_area.write_u8_with_color(
+                            ppu.oam[(y as usize * 16) + x as usize],
+                            3 + y * 2,
+                            1 + x * 3,
+                            if x % 2 == 0 { White } else { Cyan },
+                        );
+                    }
+                }
+                let y = ppu.oam_address >> 4;
+                let x = ppu.oam_address & 0x0F;
                 self.text_area.write_u8_with_color(
-                    match self.page {
-                        0x00..=0xFF => cpu_bus.read((256 * self.page) + (y as u16 * 16) + x as u16),
-                        0x100..=0x13F => {
-                            let (_, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
-                            ppu_bus.read(256 * (self.page - 0x100) + (y as u16 * 16) + x as u16)
-                        }
-                        0x140 => cpu_bus.ppu.oam[y as usize * 16 + x as usize],
-                        _ => unreachable!(),
-                    },
+                    ppu.oam[(y as usize * 16) + x as usize],
                     3 + y * 2,
                     1 + x * 3,
-                    if x % 2 == 0 { White } else { Cyan },
+                    Magenta,
                 );
             }
-        }
-
-        if self.page == 0x01 {
-            let sp = cpu.stack_pointer;
-            let y = sp >> 4;
-            let x = sp & 0x0F;
-            self.text_area.write_u8_with_color(
-                cpu_bus.read(0x0100 + (y as u16 * 16) + x as u16),
-                3 + y * 2,
-                1 + x * 3,
-                Magenta,
-            );
-        }
-
-        if self.page == cpu.program_counter & 0xFF00 {
-            let pc = cpu.program_counter;
-            let y = pc as u8 >> 4;
-            let x = pc as u8 & 0x0F;
-            self.text_area
-                .write_u8_with_color(cpu_bus.read(pc), 3 + y * 2, 1 + x * 3, Red);
-        }
-
-        if self.page == 0x140 {
-            let address = cpu_bus.ppu.oam_address;
-            let y = address >> 4;
-            let x = address & 0x0F;
-            self.text_area.write_u8_with_color(
-                cpu_bus.ppu.oam[address as usize],
-                3 + y * 2,
-                1 + x * 3,
-                Magenta,
-            );
+            _ => unreachable!(),
         }
 
         self.texture
@@ -160,52 +228,6 @@ impl SdlMemoryDebugger {
             )
             .unwrap();
         self.canvas.present();
-    }
-
-    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
-        let page_ranges = [0x00..=0x19, 0x80..=0x140];
-        match event {
-            Event::Quit { .. } => {
-                state.exit = true;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Escape),
-                ..
-            } => {
-                state.exit = true;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Up),
-                ..
-            } => {
-                self.page = increase_in_ranges(&page_ranges, self.page);
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Down),
-                ..
-            } => {
-                self.page = decrease_in_ranges(&page_ranges, self.page);
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::C),
-                ..
-            } => {
-                self.page = 0x00;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::P),
-                ..
-            } => {
-                self.page = 0x100;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::O),
-                ..
-            } => {
-                self.page = 0x140;
-            }
-            _ => {}
-        }
     }
 }
 

@@ -39,13 +39,63 @@ impl SdlGraphicsDebugger {
         }
     }
 
-    pub fn show(&mut self, nes: &mut Nes) {
+    pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
+        match event {
+            Event::Quit { .. } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Escape),
+                ..
+            } => {
+                state.exit = true;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num1),
+                ..
+            } => {
+                self.mode = 1;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num2),
+                ..
+            } => {
+                self.mode = 2;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num3),
+                ..
+            } => {
+                self.mode = 3;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::Num4),
+                ..
+            } => {
+                self.mode = 4;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::G),
+                ..
+            } => {
+                self.grid = !self.grid;
+            }
+            Event::KeyDown {
+                keycode: _k @ Some(Keycode::P),
+                ..
+            } => {
+                self.pattern_palette = (self.pattern_palette + 1) & 0b111;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn draw(&mut self, nes: &mut Nes) {
         let (_cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         let (ppu, mut ppu_bus) = cpu_bus.split_into_ppu_and_bus();
 
         if self.mode == 1 || self.mode == 2 {
             let nt = ppu.control_register.get_background_tile_select() as u16;
-
             self.texture
                 .with_lock(None, |data, _| {
                     // draw background from 4 nametables
@@ -70,7 +120,6 @@ impl SdlGraphicsDebugger {
                                                 | (0b1000)
                                                 | (yf as u16),
                                         );
-
                                         let attribute_byte = ppu_bus.read(
                                             ((0x23C0 + yn * 0x0800 + xn * 0x0400)
                                                 | (yc >> 2 << 3)
@@ -220,7 +269,6 @@ impl SdlGraphicsDebugger {
                                 for xc in 0..8usize {
                                     let index = ppu.oam[(yc * 8 + xc) * 4 + 1];
                                     let palette = ppu.oam[(yc * 8 + xc) * 4 + 2] & 0b11;
-
                                     let pt = ppu.control_register.get_sprite_tile_select() as u8;
                                     let tile = index;
 
@@ -280,9 +328,8 @@ impl SdlGraphicsDebugger {
                             }
                         }
                     }
-
                     // draw sprites in oam (if sprites are 16 pixels tall)
-                    if ppu.control_register.get_sprite_height() {
+                    else {
                         for yc in 0..8usize {
                             for yf in 0..16usize {
                                 for xc in 0..8usize {
@@ -408,56 +455,5 @@ impl SdlGraphicsDebugger {
             )
             .unwrap();
         self.canvas.present();
-    }
-
-    pub fn handle_event(&mut self, event: Event, _nes: &mut Nes, state: &mut EmulatorState) {
-        match event {
-            Event::Quit { .. } => {
-                state.exit = true;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Escape),
-                ..
-            } => {
-                state.exit = true;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Num1),
-                ..
-            } => {
-                self.mode = 1;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Num2),
-                ..
-            } => {
-                self.mode = 2;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Num3),
-                ..
-            } => {
-                self.mode = 3;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::Num4),
-                ..
-            } => {
-                self.mode = 4;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::G),
-                ..
-            } => {
-                self.grid = !self.grid;
-            }
-            Event::KeyDown {
-                keycode: _k @ Some(Keycode::P),
-                ..
-            } => {
-                self.pattern_palette = (self.pattern_palette + 1) & 0b111;
-            }
-            _ => {}
-        }
     }
 }

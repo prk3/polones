@@ -1,7 +1,7 @@
 use crate::EmulatorState;
 use polones_core::nes::Nes;
 use polones_core::ppu::PALLETTE;
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
@@ -41,6 +41,9 @@ impl SdlGraphicsDebugger {
 
     pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
+            Event::Window { win_event: WindowEvent::Close, .. } => {
+                state.exit = true;
+            }
             Event::Quit { .. } => {
                 state.exit = true;
             }

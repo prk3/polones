@@ -2,7 +2,7 @@ use crate::text_area::{Color::*, TextArea};
 use crate::EmulatorState;
 use polones_core::apu::{Pulse, Triangle};
 use polones_core::nes::Nes;
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
@@ -40,6 +40,9 @@ impl SdlApuDebugger {
 
     pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
+            Event::Window { win_event: WindowEvent::Close, .. } => {
+                state.exit = true;
+            }
             Event::Quit { .. } => {
                 state.exit = true;
             }

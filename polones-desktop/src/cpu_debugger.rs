@@ -1,7 +1,7 @@
 use crate::text_area::{Color, Color::*, TextArea};
 use crate::EmulatorState;
 use polones_core::nes::{CpuBus, Nes};
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
@@ -221,6 +221,9 @@ impl SdlCpuDebugger {
         let (cpu, mut cpu_bus) = nes.split_into_cpu_and_bus();
         if state.running {
             match event {
+                Event::Window { win_event: WindowEvent::Close, .. } => {
+                    state.exit = true;
+                }
                 Event::Quit { .. } => {
                     state.exit = true;
                 }
@@ -240,6 +243,9 @@ impl SdlCpuDebugger {
             }
         } else if !self.breakpoint_mode {
             match event {
+                Event::Window { win_event: WindowEvent::Close, .. } => {
+                    state.exit = true;
+                }
                 Event::Quit { .. } => {
                     state.exit = true;
                 }
@@ -304,6 +310,9 @@ impl SdlCpuDebugger {
             }
         } else {
             match event {
+                Event::Window { win_event: WindowEvent::Close, .. } => {
+                    state.exit = true;
+                }
                 Event::Quit { .. } => {
                     state.exit = true;
                 }

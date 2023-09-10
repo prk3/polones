@@ -1,5 +1,5 @@
 use polones_core::nes::Nes;
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use sdl2::video::WindowContext;
@@ -50,6 +50,9 @@ impl SdlMemoryDebugger {
     pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         let page_ranges = [0x00..=0x19, 0x80..=0x140];
         match event {
+            Event::Window { win_event: WindowEvent::Close, .. } => {
+                state.exit = true;
+            }
             Event::Quit { .. } => {
                 state.exit = true;
             }

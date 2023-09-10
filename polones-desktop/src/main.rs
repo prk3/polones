@@ -8,7 +8,7 @@ use polones_core::game_file::GameFile;
 use polones_core::nes::{Frame, GamepadState, Nes, PortState};
 use ppu_debugger::SdlPpuDebugger;
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
@@ -21,11 +21,11 @@ use std::path::Component;
 mod apu_debugger;
 mod cpu_debugger;
 mod graphics_debugger;
+mod mapper_debugger;
 mod memory_debugger;
 mod ppu_debugger;
 mod sdl_extensions;
 mod text_area;
-mod mapper_debugger;
 
 struct SdlGameWindow {
     canvas: sdl2::render::WindowCanvas,
@@ -71,6 +71,12 @@ impl SdlGameWindow {
 
     fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
+            Event::Window {
+                win_event: WindowEvent::Close,
+                ..
+            } => {
+                state.exit = true;
+            }
             Event::Quit { .. } => {
                 state.exit = true;
             }
@@ -271,6 +277,9 @@ struct Args {
 
     #[arg(long)]
     start_paused: bool,
+
+    #[arg(long, default_value="3")]
+    scale: u32,
 }
 
 fn main() {
@@ -312,27 +321,10 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
 
-    let game_window = video_subsystem
-        .window(
-            "nes display",
-            SdlGameWindow::WIDTH * 3,
-            SdlGameWindow::HEIGHT * 3,
-        )
-        .position(0, 1)
-        .build()
-        .unwrap();
-    let game_window_id = game_window.id();
-    let game_canvas = game_window
-        .into_canvas()
-        .present_vsync()
-        .accelerated()
-        .build()
-        .unwrap();
-
     let mut cpu_debugger = args.cpu_debugger.then(|| {
         let cpu_debugger_window = video_subsystem
             .window(
-                "nes cpu debugger",
+                "CPU debugger - Polones",
                 SdlCpuDebugger::WIDTH * 3,
                 SdlCpuDebugger::HEIGHT * 3,
             )
@@ -354,7 +346,7 @@ fn main() {
     let mut ppu_debugger = args.ppu_debugger.then(|| {
         let ppu_debugger_window = video_subsystem
             .window(
-                "nes ppu debugger",
+                "PPU debugger - Polones",
                 SdlPpuDebugger::WIDTH * 3,
                 SdlPpuDebugger::HEIGHT * 3,
             )
@@ -376,7 +368,7 @@ fn main() {
     let mut apu_debugger = args.apu_debugger.then(|| {
         let apu_debugger_window = video_subsystem
             .window(
-                "nes apu debugger",
+                "APU debugger - Polones",
                 SdlPpuDebugger::WIDTH * 3,
                 SdlPpuDebugger::HEIGHT * 3,
             )
@@ -398,7 +390,7 @@ fn main() {
     let mut memory_debugger = args.memory_debugger.then(|| {
         let memory_debugger_window = video_subsystem
             .window(
-                "nes memory debugger",
+                "memory debugger - Polones",
                 SdlMemoryDebugger::WIDTH * 2,
                 SdlMemoryDebugger::HEIGHT * 2,
             )
@@ -420,7 +412,7 @@ fn main() {
     let mut graphics_debugger = args.graphics_debugger.then(|| {
         let graphics_debugger_window = video_subsystem
             .window(
-                "nes graphics debugger",
+                "graphics debugger - Polones",
                 SdlGraphicsDebugger::WIDTH * 2,
                 SdlGraphicsDebugger::HEIGHT * 2,
             )
@@ -442,7 +434,7 @@ fn main() {
     let mut mapper_debugger = args.mapper_debugger.then(|| {
         let mapper_debugger_window = video_subsystem
             .window(
-                "nes mapper debugger",
+                "mapper debugger - Polones",
                 SdlMapperDebugger::WIDTH * 3,
                 SdlMapperDebugger::HEIGHT * 3,
             )
@@ -460,6 +452,34 @@ fn main() {
             SdlMapperDebugger::new(mapper_debugger_window_canvas),
         )
     });
+
+    let mut game_window = video_subsystem
+        .window(
+            &format!("{rom_filename} - Polones"),
+            SdlGameWindow::WIDTH * args.scale,
+            SdlGameWindow::HEIGHT * args.scale,
+        )
+        .build()
+        .unwrap();
+
+    // How to generate the raw icon:
+    // use sdl2::image::ImageRWops;
+    // let icon = sdl2::rwops::RWops::from_bytes(include_bytes!("../resources/icon-64x64.png")).unwrap().load_png().unwrap();
+    // icon.with_lock(|bytes| { dbg!(icon.pixel_format_enum()); std::fs::write("resources/icon-64x64", bytes).unwrap() });
+    // std::process::exit(0);
+
+    let mut icon_bytes = include_bytes!("../resources/icon-64x64").to_vec();
+    let icon =
+        Surface::from_data(&mut icon_bytes, 64, 64, 64 * 4, PixelFormatEnum::ABGR8888).unwrap();
+    game_window.set_icon(icon);
+
+    let game_window_id = game_window.id();
+    let game_canvas = game_window
+        .into_canvas()
+        .present_vsync()
+        .accelerated()
+        .build()
+        .unwrap();
 
     let mut game_window = SdlGameWindow::new(game_canvas);
     let mut nes = Nes::new(game_file).expect("Could not start the game");

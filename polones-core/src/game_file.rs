@@ -1,4 +1,3 @@
-#[derive(Debug)]
 pub struct GameFile {
     pub name: String,
     data: Vec<u8>,
@@ -16,6 +15,31 @@ pub struct GameFile {
     pub prg_nvram_size: Option<usize>,
     pub chr_ram_size: Option<usize>,
     pub chr_nvram_size: Option<usize>,
+}
+
+impl std::fmt::Debug for GameFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("GameFile");
+        s.field("name", &self.name);
+        s.field(
+            "data",
+            &("length", self.data.len(), "header", &self.data[0..16]),
+        );
+        s.field("format", &self.format);
+        s.field("mapper", &self.mapper);
+        s.field("submapper", &self.submapper);
+        s.field("trainer", &self.trainer);
+        s.field("prg_rom", &self.prg_rom);
+        s.field("chr_rom", &self.chr_rom);
+        s.field("mirroring_vertical", &self.mirroring_vertical);
+        s.field("battery_present", &self.battery_present);
+        s.field("four_screen_mode", &self.four_screen_mode);
+        s.field("prg_ram_size", &self.prg_ram_size);
+        s.field("prg_nvram_size", &self.prg_nvram_size);
+        s.field("chr_ram_size", &self.chr_ram_size);
+        s.field("chr_nvram_size", &self.chr_nvram_size);
+        s.finish()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -13,6 +13,7 @@ pub struct Mapper001 {
     chr_bank_1: u8,
     prg_bank: u8,
     ram: Ram<{ 32 * 1024 }>, // TODO make ram optional
+    chr_ram: Ram<{ 8 * 1024 }>,
 }
 
 impl Mapper for Mapper001 {
@@ -26,6 +27,7 @@ impl Mapper for Mapper001 {
             chr_bank_1: 0,
             prg_bank: 0,
             ram: Ram::new(),
+            chr_ram: Ram::new(),
         })
     }
 
@@ -94,6 +96,9 @@ impl Mapper for Mapper001 {
 
     fn ppu_read(&mut self, address: u16) -> u8 {
         match address {
+            0x0000..=0x1FFF if self.game.chr_rom().is_none() => {
+                self.chr_ram.read(address as usize)
+            }
             0x0000..=0x0FFF => {
                 self.game.chr_rom().unwrap()[(self.lower_chr_bank() | (address & 0x0FFF)) as usize]
             }
@@ -104,8 +109,11 @@ impl Mapper for Mapper001 {
         }
     }
 
-    fn ppu_write(&mut self, address: u16, _byte: u8) {
+    fn ppu_write(&mut self, address: u16, byte: u8) {
         match address {
+            0x0000..=0x1FFF if self.game.chr_rom().is_none() => {
+                self.chr_ram.write(address as usize, byte);
+            }
             0x0000..=0x1FFF => {
                 eprintln!("Mapper 001: PPU write to {:04X} ignored.", address);
             }

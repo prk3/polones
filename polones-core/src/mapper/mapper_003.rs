@@ -1,3 +1,4 @@
+use crate::cpu::Cpu;
 use crate::game_file::GameFile;
 
 use super::Mapper;
@@ -75,4 +76,6 @@ impl Mapper for Mapper003 {
             (address & 0b0000_0011_1111_1111) | ((address & 0b0000_1000_0000_0000) >> 1)
         }
     }
+
+    fn tick(&mut self, _cpu: &mut Cpu) {}
 }

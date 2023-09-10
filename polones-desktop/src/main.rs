@@ -2,6 +2,7 @@ use apu_debugger::SdlApuDebugger;
 use clap::Parser;
 use cpu_debugger::SdlCpuDebugger;
 use graphics_debugger::SdlGraphicsDebugger;
+use mapper_debugger::SdlMapperDebugger;
 use memory_debugger::SdlMemoryDebugger;
 use polones_core::game_file::GameFile;
 use polones_core::nes::{Frame, GamepadState, Nes, PortState};
@@ -24,6 +25,7 @@ mod memory_debugger;
 mod ppu_debugger;
 mod sdl_extensions;
 mod text_area;
+mod mapper_debugger;
 
 struct SdlGameWindow {
     canvas: sdl2::render::WindowCanvas,
@@ -262,7 +264,13 @@ struct Args {
     memory_debugger: bool,
 
     #[arg(long)]
+    mapper_debugger: bool,
+
+    #[arg(long)]
     record_inputs: bool,
+
+    #[arg(long)]
+    start_paused: bool,
 }
 
 fn main() {
@@ -310,7 +318,7 @@ fn main() {
             SdlGameWindow::WIDTH * 3,
             SdlGameWindow::HEIGHT * 3,
         )
-        .position(0, 720)
+        .position(0, 1)
         .build()
         .unwrap();
     let game_window_id = game_window.id();
@@ -394,7 +402,7 @@ fn main() {
                 SdlMemoryDebugger::WIDTH * 2,
                 SdlMemoryDebugger::HEIGHT * 2,
             )
-            .position(0, 1)
+            .position(0, 720)
             .build()
             .unwrap();
         let memory_debugger_window_id = memory_debugger_window.id();
@@ -431,6 +439,28 @@ fn main() {
         )
     });
 
+    let mut mapper_debugger = args.mapper_debugger.then(|| {
+        let mapper_debugger_window = video_subsystem
+            .window(
+                "nes mapper debugger",
+                SdlMapperDebugger::WIDTH * 3,
+                SdlMapperDebugger::HEIGHT * 3,
+            )
+            .position(0, 1)
+            .build()
+            .unwrap();
+        let mapper_debugger_window_id = mapper_debugger_window.id();
+        let mapper_debugger_window_canvas = mapper_debugger_window
+            .into_canvas()
+            .accelerated()
+            .build()
+            .unwrap();
+        (
+            mapper_debugger_window_id,
+            SdlMapperDebugger::new(mapper_debugger_window_canvas),
+        )
+    });
+
     let mut game_window = SdlGameWindow::new(game_canvas);
     let mut nes = Nes::new(game_file).expect("Could not start the game");
 
@@ -439,7 +469,7 @@ fn main() {
     let mut inputs_version = 0;
 
     let mut state = EmulatorState {
-        running: true,
+        running: !args.start_paused,
         exit: false,
         one_step: false,
     };
@@ -458,6 +488,9 @@ fn main() {
         debugger.draw(&mut nes);
     }
     if let Some((_id, debugger)) = &mut graphics_debugger {
+        debugger.draw(&mut nes);
+    }
+    if let Some((_id, debugger)) = &mut mapper_debugger {
         debugger.draw(&mut nes);
     }
 
@@ -493,13 +526,15 @@ fn main() {
         .unwrap();
     let mut audio_version = 0;
 
-    // push two frame's worth of silence to the audio runner
-    let _ = audio_sender.send(
-        std::iter::repeat(0)
-            .take(audio_samples_per_draw as usize * 2)
-            .collect(),
-    );
-    audio_playback.resume();
+    if state.running {
+        // push two frame's worth of silence to the audio runner
+        let _ = audio_sender.send(
+            std::iter::repeat(0)
+                .take(audio_samples_per_draw as usize * 2)
+                .collect(),
+        );
+        audio_playback.resume();
+    }
 
     'ui_loop: loop {
         let old_state = state.clone();
@@ -540,6 +575,13 @@ fn main() {
                 _ => {}
             }
             match &mut graphics_debugger {
+                Some((id, debugger)) if event_id == Some(*id) => {
+                    debugger.handle_event(&mut nes, event, &mut state);
+                    continue;
+                }
+                _ => {}
+            }
+            match &mut mapper_debugger {
                 Some((id, debugger)) if event_id == Some(*id) => {
                     debugger.handle_event(&mut nes, event, &mut state);
                     continue;
@@ -665,6 +707,9 @@ fn main() {
             debugger.draw(&mut nes);
         }
         if let Some((_id, debugger)) = &mut graphics_debugger {
+            debugger.draw(&mut nes);
+        }
+        if let Some((_id, debugger)) = &mut mapper_debugger {
             debugger.draw(&mut nes);
         }
         game_window.draw_and_wait(&mut nes);

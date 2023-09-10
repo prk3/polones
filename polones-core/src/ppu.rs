@@ -210,8 +210,8 @@ pub struct Ppu {
     sprite_counters: [u8; 64],
     sprite_0_next_scanline: bool,
     sprite_0_current_scanline: bool,
-    sprites_next_frame: usize,
-    sprites_current_frame: usize,
+    sprites_next_line: usize,
+    sprites_current_line: usize,
 }
 
 impl Ppu {
@@ -257,8 +257,8 @@ impl Ppu {
             sprite_counters: [0xFF; 64],
             sprite_0_next_scanline: false,
             sprite_0_current_scanline: false,
-            sprites_next_frame: 0,
-            sprites_current_frame: 0,
+            sprites_next_line: 0,
+            sprites_current_line: 0,
         }
     }
 
@@ -281,65 +281,12 @@ impl Ppu {
 
         // secondary oam clear
         if self.scanline <= 239 && self.dot == 64 {
-            for byte in &mut self.sprite_secondary_oam[..] {
-                *byte = 0xFF;
-            }
+            self.clear_secondary_oam();
         }
 
         // sprite evaluation for next scanline
         if self.scanline <= 239 && self.dot == 256 {
-            let mut n = 0;
-            let mut n_on_overflow = 0;
-            let mut sprites_found = 0;
-            let sprite_height = 8 << (self.control_register.get_sprite_height() as u8);
-
-            self.sprite_0_next_scanline = false;
-
-            loop {
-                let y = self.oam[n * 4 + 0];
-                self.sprite_secondary_oam[sprites_found * 4 + 0] = y;
-                if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
-                    self.sprite_secondary_oam[sprites_found * 4 + 1] = self.oam[n * 4 + 1];
-                    self.sprite_secondary_oam[sprites_found * 4 + 2] = self.oam[n * 4 + 2];
-                    self.sprite_secondary_oam[sprites_found * 4 + 3] = self.oam[n * 4 + 3];
-                    sprites_found += 1;
-
-                    if n == 0 {
-                        self.sprite_0_next_scanline = true;
-                    }
-                }
-                n += 1;
-                if n == 64 {
-                    break;
-                }
-                if sprites_found == 8 {
-                    n_on_overflow = n;
-                }
-                if sprites_found == self.sprite_limit {
-                    break;
-                }
-            }
-            if sprites_found == 8 {
-                let mut m = 0;
-                n = n_on_overflow;
-                while n < 64 {
-                    let y = self.oam[n * 4 + m];
-                    if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
-                        self.status_register.set_sprite_overflow_flag(true);
-                        break;
-                    } else {
-                        n += 1;
-                        // hardware bug
-                        m = (n + 1) & 0b11;
-
-                        if n == 64 {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            self.sprites_next_frame = sprites_found;
+            self.evaluate_sprites();
         }
 
         // sprite tile fetches
@@ -379,7 +326,7 @@ impl Ppu {
                 self.set_oam_pattern(ppu_bus, sprite_number, true);
             }
             self.sprite_0_current_scanline = self.sprite_0_next_scanline;
-            self.sprites_current_frame = self.sprites_next_frame;
+            self.sprites_current_line = self.sprites_next_line;
         }
 
         // deal with render and pre-render scanlines
@@ -391,7 +338,7 @@ impl Ppu {
                 self.attribute_high_shift_register <<= 1;
             }
             if (2..=257).contains(&self.dot) {
-                for i in 0..self.sprite_limit {
+                for i in 0..self.sprites_current_line {
                     if self.sprite_counters[i] > 0 {
                         self.sprite_counters[i] -= 1;
                     } else {
@@ -435,7 +382,7 @@ impl Ppu {
                 if self.mask_register.get_show_sprites()
                     && !(!self.mask_register.get_show_sprites() && self.dot <= 8)
                 {
-                    for i in 0..self.sprites_current_frame {
+                    for i in 0..self.sprites_current_line {
                         if self.sprite_counters[i] == 0 {
                             let color_low = self.sprite_patterns_low[i] >> 7;
                             let color_high = self.sprite_patterns_high[i] >> 7;
@@ -583,7 +530,6 @@ impl Ppu {
             std::mem::swap(&mut peripherals.display.frame, &mut self.buffer);
             peripherals.display.cpu_cycle = cpu.cycle;
             peripherals.display.version = peripherals.display.version.wrapping_add(1);
-            // println!("x frame_ready {:?}", std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros());
         }
 
         if self.dot == 257 {}
@@ -744,6 +690,67 @@ impl Ppu {
         }
     }
 
+    fn evaluate_sprites(&mut self) {
+        let mut n = 0;
+        let mut n_on_overflow = 0;
+        let mut sprites_found = 0;
+        let sprite_height = 8 << (self.control_register.get_sprite_height() as u8);
+
+        self.sprite_0_next_scanline = false;
+
+        loop {
+            let y = self.oam[n * 4 + 0];
+            self.sprite_secondary_oam[sprites_found * 4 + 0] = y;
+            if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+                self.sprite_secondary_oam[sprites_found * 4 + 1] = self.oam[n * 4 + 1];
+                self.sprite_secondary_oam[sprites_found * 4 + 2] = self.oam[n * 4 + 2];
+                self.sprite_secondary_oam[sprites_found * 4 + 3] = self.oam[n * 4 + 3];
+                sprites_found += 1;
+
+                if n == 0 {
+                    self.sprite_0_next_scanline = true;
+                }
+            }
+            n += 1;
+            if n == 64 {
+                break;
+            }
+            if sprites_found == 8 {
+                n_on_overflow = n;
+            }
+            if sprites_found == self.sprite_limit {
+                break;
+            }
+        }
+        if sprites_found == 8 {
+            let mut m = 0;
+            n = n_on_overflow;
+            while n < 64 {
+                let y = self.oam[n * 4 + m];
+                if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+                    self.status_register.set_sprite_overflow_flag(true);
+                    break;
+                } else {
+                    n += 1;
+                    // hardware bug
+                    m = (n + 1) & 0b11;
+
+                    if n == 64 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.sprites_next_line = sprites_found;
+    }
+
+    fn clear_secondary_oam(&mut self) {
+        for byte in &mut self.sprite_secondary_oam[..] {
+            *byte = 0xFF;
+        }
+    }
+
     fn set_oam_pattern(&mut self, ppu_bus: &mut PpuBus, sprite_number: usize, pattern_high: bool) {
         let y = self.sprite_secondary_oam[sprite_number * 4 + 0] as u16;
         let index = self.sprite_secondary_oam[sprite_number * 4 + 1];
@@ -758,11 +765,6 @@ impl Ppu {
         } else {
             &mut self.sprite_patterns_low
         };
-
-        if self.scanline < y || self.scanline >= y + sprite_height {
-            target[sprite_number] = 0;
-            return;
-        }
 
         let scanline_offset = self.scanline - y;
         let character_table;

@@ -268,6 +268,18 @@ impl SdlCpuDebugger {
                     }
                 }
                 Event::KeyDown {
+                    keycode: _k @ Some(Keycode::I),
+                    ..
+                } => {
+                    let irq = irq_address(&mut cpu_bus);
+
+                    if self.breakpoints.contains(&irq) {
+                        self.breakpoints.retain(|b| *b != irq);
+                    } else {
+                        self.breakpoints.push(irq);
+                    }
+                }
+                Event::KeyDown {
                     keycode: _k @ Some(Keycode::B),
                     ..
                 } => match self.disassembly[cpu.program_counter as usize] {
@@ -422,11 +434,13 @@ impl SdlCpuDebugger {
         ta.write_bool_with_color(cpu.status_register.get_carry(), 13, 3, White);
 
         if self.breakpoint_mode {
-            ta.write_char_with_color('B', 28, 0, Red);
+            ta.write_char_with_color('B', 27, 0, Red);
         }
-
         if self.breakpoints.contains(&nmi_address(&mut cpu_bus)) {
-            ta.write_str_with_color("NMI", 29, 0, Red);
+            ta.write_str_with_color("NMI", 28, 0, Red);
+        }
+        if self.breakpoints.contains(&irq_address(&mut cpu_bus)) {
+            ta.write_str_with_color("IRQ", 29, 0, Red);
         }
 
         let mut color = Red;
@@ -711,6 +725,13 @@ fn nmi_address(cpu_bus: &mut CpuBus<'_>) -> u16 {
     let high = cpu_bus.read(0xFFFB);
     let nmi = ((high as u16) << 8) | low as u16;
     nmi
+}
+
+fn irq_address(cpu_bus: &mut CpuBus<'_>) -> u16 {
+    let low = cpu_bus.read(0xFFFE);
+    let high = cpu_bus.read(0xFFFF);
+    let irq = ((high as u16) << 8) | low as u16;
+    irq
 }
 
 #[test]

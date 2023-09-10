@@ -1,3 +1,4 @@
+use crate::cpu::Cpu;
 use crate::game_file::GameFile;
 use crate::ram::Ram;
 
@@ -121,6 +122,8 @@ impl Mapper for Mapper001 {
             _ => unreachable!(),
         }
     }
+
+    fn tick(&mut self, _cpu: &mut Cpu) {}
 }
 
 impl Mapper001 {

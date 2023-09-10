@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct GameFile {
     pub name: String,
     data: Vec<u8>,
@@ -17,7 +18,7 @@ pub struct GameFile {
     pub chr_nvram_size: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FileFormat {
     ArchaicINes,
     INes,

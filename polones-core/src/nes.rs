@@ -208,6 +208,7 @@ impl Nes {
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
         ppu.tick(cpu, &mut ppu_bus, &mut peripherals);
+        ppu_bus.mapper.tick(cpu);
     }
 
     pub fn run_one_cpu_instruction(&mut self) {

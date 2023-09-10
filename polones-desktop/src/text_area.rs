@@ -88,6 +88,7 @@ impl<const W: usize, const H: usize> TextArea<W, H> {
             '*' => (2, 10),
             '+' => (2, 11),
             ',' => (2, 12),
+            '_' => (2, 13), // draw _ as -
             '-' => (2, 13),
             '.' => (2, 14),
             '/' => (2, 15),
@@ -152,5 +153,20 @@ impl<const W: usize, const H: usize> TextArea<W, H> {
             col,
             color,
         );
+    }
+
+    pub fn write_dec_with_color(&mut self, value: u64, line: u8, col: u8, color: Color) {
+        use std::io::Write;
+        let mut buffer = [0u8; 20];
+        let mut cursor = std::io::Cursor::new(buffer.as_mut());
+        write!(cursor, "{}", value).unwrap();
+        for (i, byte) in buffer.into_iter().take_while(|byte| *byte != 0).enumerate() {
+            self.write_char_with_color(
+                char::from_u32(byte as u32).unwrap(),
+                line,
+                col + i as u8,
+                color,
+            );
+        }
     }
 }

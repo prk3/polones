@@ -1,5 +1,6 @@
 use crate::cpu::Cpu;
 use crate::game_file::GameFile;
+use crate::mapper::DebugValue;
 use crate::ram::Ram;
 
 use super::Mapper;
@@ -100,10 +101,10 @@ impl Mapper for Mapper001 {
                 self.chr_ram.read(address as usize)
             }
             0x0000..=0x0FFF => {
-                self.game.chr_rom().unwrap()[(self.lower_chr_bank() | (address & 0x0FFF)) as usize]
+                self.game.chr_rom().unwrap()[self.lower_chr_bank() | (address as usize & 0x0FFF)]
             }
             0x1000..=0x1FFF => {
-                self.game.chr_rom().unwrap()[(self.upper_chr_bank() | (address & 0x0FFF)) as usize]
+                self.game.chr_rom().unwrap()[self.upper_chr_bank() | (address as usize & 0x0FFF)]
             }
             _ => panic!("Mapper 001: PPU read of {:04X} out of bounds.", address),
         }
@@ -132,22 +133,34 @@ impl Mapper for Mapper001 {
     }
 
     fn tick(&mut self, _cpu: &mut Cpu) {}
+
+    fn gather_debug_info(&self) -> Vec<(&'static str, DebugValue)> {
+        vec![
+            ("mapper", DebugValue::Dec(1)),
+            ("control", DebugValue::U8Hex(self.control)),
+            ("chr_bank_0", DebugValue::U8Hex(self.chr_bank_0)),
+            ("chr_bank_1", DebugValue::U8Hex(self.chr_bank_1)),
+            ("prg_bank", DebugValue::U8Hex(self.prg_bank)),
+            ("load_register", DebugValue::U8Hex(self.load_register)),
+            ("load_register_bits", DebugValue::Dec(self.load_register_bits as u64)),
+        ]
+    }
 }
 
 impl Mapper001 {
-    fn lower_chr_bank(&self) -> u16 {
+    fn lower_chr_bank(&self) -> usize {
         if self.control & 0b10000 > 0 {
-            0x1000 * self.chr_bank_0 as u16
+            0x1000 * self.chr_bank_0 as usize
         } else {
-            0x1000 * (self.chr_bank_0 as u16 & 0b11110)
+            0x1000 * (self.chr_bank_0 as usize & 0b11110)
         }
     }
 
-    fn upper_chr_bank(&self) -> u16 {
+    fn upper_chr_bank(&self) -> usize {
         if self.control & 0b10000 > 0 {
-            0x1000 * self.chr_bank_1 as u16
+            0x1000 * self.chr_bank_1 as usize
         } else {
-            0x1000 * (self.chr_bank_0 as u16 | 0b00001)
+            0x1000 * (self.chr_bank_0 as usize | 0b00001)
         }
     }
 }

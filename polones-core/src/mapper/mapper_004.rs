@@ -96,7 +96,7 @@ impl Mapper for Mapper004 {
     }
 
     fn cpu_read(&mut self, address: u16) -> u8 {
-        let rel = (address & 0x1FFF) as usize;
+        let offset = (address & 0x1FFF) as usize;
         match address {
             0x6000..=0x7FFF => match &self.ram {
                 Some(ram) if self.ram_enable => ram.read((address - 0x6000) as usize),
@@ -104,21 +104,32 @@ impl Mapper for Mapper004 {
             },
             0x8000..=0x9FFF => {
                 if self.prg_rom_bank_mode {
-                    self.game.prg_rom()[(self.game.prg_rom().len() - 0x4000) as usize | rel]
+                    let base = self.game.prg_rom().len() - 0x4000;
+                    self.game.prg_rom()[base | offset]
                 } else {
-                    self.game.prg_rom()[((self.r6 as usize) << 13) | rel]
+                    let base = (self.r6 as usize) << 13;
+                    let mask = self.game.prg_rom().len() - 1;
+                    self.game.prg_rom()[(base | offset) & mask]
                 }
             }
-            0xA000..=0xBFFF => self.game.prg_rom()[(self.r7 as usize) << 13 | rel],
+            0xA000..=0xBFFF => {
+                let base = (self.r7 as usize) << 13;
+                let mask = self.game.prg_rom().len() - 1;
+                self.game.prg_rom()[(base | offset) & mask]
+            }
             0xC000..=0xDFFF => {
                 if self.prg_rom_bank_mode {
-                    self.game.prg_rom()[(self.r6 as usize) << 13 | rel]
+                    let base = (self.r6 as usize) << 13;
+                    let mask = self.game.prg_rom().len() - 1;
+                    self.game.prg_rom()[(base | offset) & mask]
                 } else {
-                    self.game.prg_rom()[(self.game.prg_rom().len() - 0x4000) as usize | rel]
+                    let base = self.game.prg_rom().len() - 0x4000;
+                    self.game.prg_rom()[base | offset]
                 }
             }
             0xE000..=0xFFFF => {
-                self.game.prg_rom()[(self.game.prg_rom().len() - 0x2000) as usize | rel]
+                let base = self.game.prg_rom().len() - 0x2000;
+                self.game.prg_rom()[base | offset]
             }
             _ => panic!("Mapper 004: CPU read from {:04X} out of bounds.", address),
         }

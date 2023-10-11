@@ -58,6 +58,24 @@ pub fn item(input: &str) -> nom::IResult<&str, Option<Item>> {
                     |tuple| Directive::PutAddressAtPrgAddress(tuple.4 .0, tuple.4 .1, tuple.10),
                 ),
                 map(
+                    tuple((
+                        tag("put"),
+                        space1,
+                        tag("image"),
+                        space1,
+                        path,
+                        space1,
+                        tag("at"),
+                        space1,
+                        tag("chr"),
+                        space1,
+                        long_address_hex,
+                        space0,
+                        eof,
+                    )),
+                    |tuple| Directive::PutImageAtChrAddress(tuple.4, tuple.10),
+                ),
+                map(
                     separated_list1(space1, take_while1(|c: char| !c.is_whitespace())),
                     |list: Vec<&str>| {
                         Directive::Other(list.into_iter().map(String::from).collect())
@@ -300,6 +318,13 @@ fn label_line(input: &str) -> nom::IResult<&str, String> {
 
 fn label_local_line(input: &str) -> nom::IResult<&str, String> {
     delimited(space0, label_local, tuple((space0, eof)))(input)
+}
+
+fn path(input: &str) -> nom::IResult<&str, String> {
+    map_res(
+        take_while1(|c: char| !c.is_ascii_whitespace()),
+        |label: &str| Result::<_, Infallible>::Ok(label.to_string()),
+    )(input)
 }
 
 fn long_address_hex(input: &str) -> nom::IResult<&str, usize> {

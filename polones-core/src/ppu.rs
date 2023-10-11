@@ -210,6 +210,9 @@ pub struct Ppu {
     sprite_counters: [u8; 64],
     sprite_0_next_scanline: bool,
     sprite_0_current_scanline: bool,
+
+    // These variables allow us to skip processing sprites that are not visible
+    // on the screen on a given frame.
     sprites_next_line: usize,
     sprites_current_line: usize,
 }
@@ -257,6 +260,7 @@ impl Ppu {
             sprite_counters: [0xFF; 64],
             sprite_0_next_scanline: false,
             sprite_0_current_scanline: false,
+
             sprites_next_line: 0,
             sprites_current_line: 0,
         }
@@ -700,7 +704,17 @@ impl Ppu {
 
         loop {
             let y = self.oam[n * 4 + 0];
+
+            // Copying the first byte of a sprite to secondary oam before
+            // checking sprite's y position is the behavior documented at
+            // https://www.nesdev.org/wiki/PPU_OAM
+            // The theoretical consequence of this logic is showing a broken
+            // sprite on the last pixel of every line. I don't know if original
+            // NES does that, but both mesen and fceux don't. Polones ignores
+            // these broken sprites by setting self.sprites_next_line to the
+            // number of "correct" sprites.
             self.sprite_secondary_oam[sprites_found * 4 + 0] = y;
+
             if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
                 self.sprite_secondary_oam[sprites_found * 4 + 1] = self.oam[n * 4 + 1];
                 self.sprite_secondary_oam[sprites_found * 4 + 2] = self.oam[n * 4 + 2];
@@ -766,7 +780,9 @@ impl Ppu {
             &mut self.sprite_patterns_low
         };
 
-        let scanline_offset = self.scanline - y;
+        // broken sprites can be further than 7 or 15 pixes from the current scanline
+        let scanline_offset = self.scanline.overflowing_sub(y).0 & (sprite_height - 1);
+
         let character_table;
         let tile_offset;
         let tile_row_number;

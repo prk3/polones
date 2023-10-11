@@ -31,6 +31,7 @@ pub enum Instruction {
 pub enum Directive {
     PutAddressOfSubroutineAtPrgAddress(String, usize),
     PutAddressAtPrgAddress(u8, u8, usize),
+    PutImageAtChrAddress(String, usize),
     Other(Vec<String>),
 }
 

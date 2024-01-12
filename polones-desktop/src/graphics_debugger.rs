@@ -41,7 +41,10 @@ impl SdlGraphicsDebugger {
 
     pub fn handle_event(&mut self, _nes: &mut Nes, event: Event, state: &mut EmulatorState) {
         match event {
-            Event::Window { win_event: WindowEvent::Close, .. } => {
+            Event::Window {
+                win_event: WindowEvent::Close,
+                ..
+            } => {
                 state.exit = true;
             }
             Event::Quit { .. } => {
@@ -289,15 +292,25 @@ impl SdlGraphicsDebugger {
                                     );
 
                                     for xf in 0..8usize {
-                                        let (r, g, b) = if ((high >> 7 << 1) | low >> 7) == 0 {
-                                            PALLETTE[(ppu_bus.read(0x3F00) & 0b00111111) as usize]
+                                        let color = (high >> 7 << 1) | low >> 7;
+                                        let (r, g, b) = if self.mode == 4 {
+                                            match color {
+                                                0 => (0, 0, 0),
+                                                1 => (75, 75, 75),
+                                                2 => (170, 170, 170),
+                                                3 => (255, 255, 255),
+                                                _ => unreachable!(),
+                                            }
                                         } else {
-                                            let b = ppu_bus.read(
-                                                0x3F10
-                                                    + ((palette as u16) << 2)
-                                                    + (((high as u16) >> 7 << 1) | low as u16 >> 7),
-                                            ) & 0b00111111;
-                                            PALLETTE[b as usize]
+                                            if color == 0 {
+                                                PALLETTE
+                                                    [(ppu_bus.read(0x3F00) & 0b00111111) as usize]
+                                            } else {
+                                                let b = ppu_bus.read(
+                                                    0x3F10 + ((palette as u16) << 2) + color as u16,
+                                                ) & 0b00111111;
+                                                PALLETTE[b as usize]
+                                            }
                                         };
 
                                         let i = (256 * 512)

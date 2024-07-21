@@ -7,6 +7,7 @@ mod mapper_002;
 mod mapper_003;
 mod mapper_004;
 mod mapper_007;
+mod mapper_009;
 
 type DynMapper = Box<dyn Mapper + Send + 'static>;
 
@@ -51,6 +52,9 @@ pub fn mapper_from_game_file(game: GameFile) -> Result<Box<dyn Mapper + Send + '
         }
         (7, _) => {
             mapper_007::Mapper007::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
+        }
+        (9, _) => {
+            mapper_009::Mapper009::from_game(game).map(|mapper| Box::new(mapper) as DynMapper)
         }
         _ => Err("unsupported mapper"),
     }

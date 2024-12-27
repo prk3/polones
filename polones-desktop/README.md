@@ -4,7 +4,15 @@ This app lets you play NES games on your computer. It's rather bare-bones, expec
 
 ## Installation
 
-If you're on Linux desktop, you can download a pre-built binary from [https://github.com/prk3/polones/releases](https://github.com/prk3/polones/releases). Drop in a directory with executables, e.g. `/usr/local/bin`, make it executable (`chmod +x ...`), and you're good to go.
+Download a binary for your platform from the [releases](https://github.com/prk3/polones/releases) page. On Linux you have to drop it in a directory with executables, e.g. `/usr/local/bin`, and make it executable (`chmod +x ...`).
+
+Here are available options:
+
+| file                  | Platform                                                 |
+|-----------------------|----------------------------------------------------------|
+| polones-desktop-amd64 | 64 bit Linux desktops                                    |
+| polones-desktop-arm64 | 64 bit Linux on Raspberry Pi (3, 4, 400, 5, 500, Zero 2) |
+| polones-desktop-armv7 | 32 bit Linux on Raspberry Pi (as above + 2)              |
 
 If you're on a different platform, you'll have to build polones-desktop from source.
 

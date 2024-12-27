@@ -10,6 +10,18 @@ FROM debian:bullseye
 # some libs (e.g. libdecor-0-dev) are only available in backports repo.
 RUN printf "\ndeb http://ftp.debian.org/debian bullseye-backports main\n" >> /etc/apt/sources.list
 
+# so
+# installing any package on ubuntu or debian when host arch is amd64 and target
+# arch is arm64 ends with libc-bin throwing a segmentation fault.
+# apparently, removing libc-bin manually and reinstalling in fixes the issue.
+# software is so much fun, isn't it?
+# https://stackoverflow.com/a/76260513
+# thank you Sunghoon Cho
+RUN rm /var/lib/dpkg/info/libc-bin.* && \
+    apt clean && \
+    apt update && \
+    apt install libc-bin
+
 # the list of packages comes from SDL2 docs:
 # https://github.com/libsdl-org/SDL/blob/SDL2/docs/README-linux.md
 RUN apt update && apt install -y build-essential git make autoconf automake libtool \

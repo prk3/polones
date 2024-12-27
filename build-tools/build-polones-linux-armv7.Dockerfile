@@ -1,8 +1,7 @@
-# makes a static build of SDL
+# builds polones-dekstop for linux armv7
 # expects:
-#   - /sdl-source to contain SDL source code
-#   - /sdl-config to be an empty dir for SDL build config files
-#   - /sdl-build to be an empty dir for build artifacts
+#   - /polones to contain polones source code
+#   - /sdl-build to contain SDL build artifacts
 
 # we compile on debian oldstable to depend on a pretty old glibc version.
 FROM debian:bullseye
@@ -22,6 +21,17 @@ RUN apt update && apt install -y build-essential git make autoconf automake libt
     # curl is needed for installing rustup.
     curl
 
+# rustup is installed in user's home directory, so we must set up a user with home.
 ARG USER=1000 GROUP=1000
+RUN groupadd --gid $GROUP rust && useradd --uid $USER --gid $GROUP --create-home rust
 USER $USER:$GROUP
-CMD ["sh", "-c", "cd /sdl-config && /sdl-source/configure --prefix=/sdl-build --with-pic && make -j4 && make install"]
+
+# we now install rustup and the desired rust toolchain.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.83.0 -y
+
+WORKDIR /polones/polones-desktop
+ENV PKG_CONFIG_PATH=/sdl-build/lib/pkgconfig/
+ENV RUSTFLAGS="-C relocation-model=pic"
+
+# source of rustup env and build must happen in one command.
+CMD ["sh", "-c", ". \"$HOME/.cargo/env\" && cargo build --target armv7-unknown-linux-gnueabihf --features sdl2/static-link,sdl2/use-pkgconfig --profile release"]

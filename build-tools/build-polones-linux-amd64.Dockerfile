@@ -27,7 +27,7 @@ RUN groupadd --gid $GROUP rust && useradd --uid $USER --gid $GROUP --create-home
 USER $USER:$GROUP
 
 # we now install rustup and the desired rust toolchain.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.83.0 -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain 1.83.0 -y
 
 WORKDIR /polones/polones-desktop
 ENV PKG_CONFIG_PATH=/sdl-build/lib/pkgconfig/

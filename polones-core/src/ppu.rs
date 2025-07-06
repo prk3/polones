@@ -267,107 +267,75 @@ impl Ppu {
     }
 
     pub fn tick(&mut self, cpu: &mut Cpu, ppu_bus: &mut PpuBus, peripherals: &mut Peripherals) {
-        // vblank start
-        if self.scanline == 241 && self.dot == 1 {
-            self.vblank = true;
-            self.status_register.set_vblank_flag(true);
-            if self.control_register.get_nmi_enable() {
-                cpu.nmi();
-            }
-        }
-        // vblank end
-        if self.scanline == 261 && self.dot == 1 {
-            self.vblank = false;
-            self.status_register.set_vblank_flag(false);
-            self.status_register.set_sprite_0_hit_flag(false);
-            self.status_register.set_sprite_overflow_flag(false);
-        }
-
-        // secondary oam clear
-        if self.scanline <= 239 && self.dot == 64 {
-            self.clear_secondary_oam();
-        }
-
-        // sprite evaluation for next scanline
-        if self.scanline <= 239 && self.dot == 256 {
-            self.evaluate_sprites();
-        }
-
-        // sprite tile fetches
-        if (self.scanline <= 239 || self.scanline == 261) && (257..=320).contains(&self.dot) {
-            let nth = self.dot - 257;
-            let sprite_number = nth as usize >> 3;
-            match nth % 8 {
-                0 => {
-                    // garbage NT read
-                    ppu_bus.read(0x2000);
+        // to call on scanline 241 dot 1
+        macro_rules! start_vblank {
+            () => {
+                self.vblank = true;
+                self.status_register.set_vblank_flag(true);
+                if self.control_register.get_nmi_enable() {
+                    cpu.nmi();
                 }
-                2 => {
-                    // garbage AT read
-                    ppu_bus.read(0x23C0);
-                    self.sprite_attributes[sprite_number] =
-                        self.sprite_secondary_oam[sprite_number * 4 + 2];
+            };
+        }
+
+        // to call on scanline 261 dot 1
+        macro_rules! end_vblank {
+            () => {
+                self.vblank = false;
+                self.status_register.set_vblank_flag(false);
+                self.status_register.set_sprite_0_hit_flag(false);
+                self.status_register.set_sprite_overflow_flag(false);
+            };
+        }
+
+        // to call on scanlines 0..=239 and 261, dots 257..=320
+        macro_rules! fetch_sprites {
+            () => {
+                let nth = self.dot - 257;
+                let sprite_number = nth as usize >> 3;
+                match nth & 0b111 {
+                    0 => {
+                        // garbage NT read
+                        ppu_bus.read(0x2000);
+                    }
+                    2 => {
+                        // garbage AT read
+                        ppu_bus.read(0x23C0);
+                        self.sprite_attributes[sprite_number] =
+                            self.sprite_secondary_oam[sprite_number * 4 + 2];
+                    }
+                    3 => {
+                        self.sprite_counters[sprite_number] =
+                            self.sprite_secondary_oam[sprite_number * 4 + 3];
+                    }
+                    4 => {
+                        self.set_oam_pattern(ppu_bus, sprite_number, false);
+                    }
+                    6 => {
+                        self.set_oam_pattern(ppu_bus, sprite_number, true);
+                    }
+                    _ => {}
                 }
-                3 => {
+            };
+        }
+
+        // to call on scanlines 0..=239 and 261, dot 320
+        macro_rules! fetch_sprites_8_64 {
+            () => {
+                for sprite_number in 8..self.sprite_limit {
                     self.sprite_counters[sprite_number] =
                         self.sprite_secondary_oam[sprite_number * 4 + 3];
-                }
-                4 => {
                     self.set_oam_pattern(ppu_bus, sprite_number, false);
-                }
-                6 => {
                     self.set_oam_pattern(ppu_bus, sprite_number, true);
                 }
-                _ => {}
-            }
-        }
-        // sprite 8-63 fetches
-        if (self.scanline <= 239 || self.scanline == 261) && self.dot == 320 {
-            for sprite_number in 8..self.sprite_limit {
-                self.sprite_counters[sprite_number] =
-                    self.sprite_secondary_oam[sprite_number * 4 + 3];
-                self.set_oam_pattern(ppu_bus, sprite_number, false);
-                self.set_oam_pattern(ppu_bus, sprite_number, true);
-            }
-            self.sprite_0_current_scanline = self.sprite_0_next_scanline;
-            self.sprites_current_line = self.sprites_next_line;
+                self.sprite_0_current_scanline = self.sprite_0_next_scanline;
+                self.sprites_current_line = self.sprites_next_line;
+            };
         }
 
-        // deal with render and pre-render scanlines
-        if self.scanline <= 239 || self.scanline == 261 {
-            if (2..=257).contains(&self.dot) || (322..=337).contains(&self.dot) {
-                self.pattern_low_shift_register <<= 1;
-                self.pattern_high_shift_register <<= 1;
-                self.attribute_low_shift_register <<= 1;
-                self.attribute_high_shift_register <<= 1;
-            }
-            if (2..=257).contains(&self.dot) {
-                for i in 0..self.sprites_current_line {
-                    if self.sprite_counters[i] > 0 {
-                        self.sprite_counters[i] -= 1;
-                    } else {
-                        self.sprite_patterns_low[i] <<= 1;
-                        self.sprite_patterns_high[i] <<= 1;
-                    }
-                }
-            }
-            if ((9..=257).contains(&self.dot) || (329..=337).contains(&self.dot))
-                && (self.dot - 1) % 8 == 0
-            {
-                self.pattern_low_shift_register |= self.bg_tile_byte_low as u16;
-                self.pattern_high_shift_register |= self.bg_tile_byte_high as u16;
-                self.attribute_low_shift_register |= if self.attribute & 0b01 > 0 {
-                    0xFF
-                } else {
-                    0x00
-                };
-                self.attribute_high_shift_register |= if self.attribute & 0b10 > 0 {
-                    0xFF
-                } else {
-                    0x00
-                };
-            }
-            if self.scanline <= 239 && (1..=256).contains(&self.dot) {
+        // to call on scanlines 0..=239, dots 1..=256
+        macro_rules! draw_pixel {
+            () => {
                 let mut background = None;
                 if self.mask_register.get_show_background()
                     && !(!self.mask_register.get_show_background_in_leftmost_col() && self.dot <= 8)
@@ -454,11 +422,20 @@ impl Ppu {
                     }
                 };
                 self.buffer[self.buffer_index / 256][self.buffer_index % 256] = rgb;
-
                 self.buffer_index += 1;
-            }
-            if (1..=256).contains(&self.dot) || (321..=336).contains(&self.dot) {
-                match (self.dot - 1) % 8 {
+
+                if self.buffer_index == 256 * 240 {
+                    self.buffer_index = 0;
+                    std::mem::swap(&mut peripherals.display.frame, &mut self.buffer);
+                    peripherals.display.cpu_cycle = cpu.cycle;
+                    peripherals.display.version = peripherals.display.version.wrapping_add(1);
+                }
+            };
+        }
+
+        macro_rules! fetch_background_tiles {
+            () => {
+                match (self.dot - 1) & 0b111 {
                     0 => {
                         self.nametable_byte = ppu_bus.read(0x2000 | (self.v.0 & 0x0FFF));
                     }
@@ -516,55 +493,211 @@ impl Ppu {
                     }
                     _ => {}
                 }
-            }
-            if self.dot == 257 && self.is_rendering_enabled() {
-                self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
-                self.v.set_nametable_select(
-                    (self.v.get_nametable_select() & 0b10) | (self.t.get_nametable_select() & 0b01),
-                );
-            }
-            if (337..=339).contains(&self.dot) {
-                self.nametable_byte = ppu_bus.read(0x2000 + (self.v.0 & 0x0FFF));
-            }
+            };
         }
 
-        // display screen buffer if ready
-        if self.buffer_index == 256 * 240 {
-            self.buffer_index = 0;
-            std::mem::swap(&mut peripherals.display.frame, &mut self.buffer);
-            peripherals.display.cpu_cycle = cpu.cycle;
-            peripherals.display.version = peripherals.display.version.wrapping_add(1);
-        }
-
-        if self.dot == 257 {}
-        if self.scanline == 261 && self.dot >= 280 && self.dot <= 304 && self.is_rendering_enabled()
-        {
-            self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
-            self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
-            self.v.set_nametable_select(
-                (self.v.get_nametable_select() & 0b01) | (self.t.get_nametable_select() & 0b10),
-            );
-        }
-
-        if self.dot == 340 {
-            self.dot = 0;
-            if self.scanline == 261 {
-                // On odd frames scanline 261 dot 340 should be skipped.
-                // However, it's easier to run it normally and then skip
-                // to scanline 0 dot 1
-                if self.odd {
-                    self.scanline = 0;
-                    self.dot = 1;
-                } else {
-                    self.scanline = 0;
+        macro_rules! update_scroll_horizontal {
+            () => {
+                if self.is_rendering_enabled() {
+                    self.v.set_coarse_x_scroll(self.t.get_coarse_x_scroll());
+                    self.v.set_nametable_select(
+                        (self.v.get_nametable_select() & 0b10)
+                            | (self.t.get_nametable_select() & 0b01),
+                    );
                 }
-                self.buffer_index = 0;
-                self.odd = !self.odd;
+            };
+        }
+
+        macro_rules! update_scroll_vertical {
+            () => {
+                if self.is_rendering_enabled() {
+                    self.v.set_coarse_y_scroll(self.t.get_coarse_y_scroll());
+                    self.v.set_fine_y_scroll(self.t.get_fine_y_scroll());
+                    self.v.set_nametable_select(
+                        (self.v.get_nametable_select() & 0b01)
+                            | (self.t.get_nametable_select() & 0b10),
+                    );
+                }
+            };
+        }
+
+        // to call on scanlines 0..=239 and 261, dots 1..=256 and 321..=336
+        macro_rules! rotate_pattern_and_attribute_shift_registers {
+            () => {
+                self.pattern_low_shift_register <<= 1;
+                self.pattern_high_shift_register <<= 1;
+                self.attribute_low_shift_register <<= 1;
+                self.attribute_high_shift_register <<= 1;
+            };
+        }
+
+        // to call on scanlines 0..=239 and 261, dots 1..=256
+        macro_rules! rotate_sprite_patterns {
+            () => {
+                for i in 0..self.sprites_current_line {
+                    if self.sprite_counters[i] > 0 {
+                        self.sprite_counters[i] -= 1;
+                    } else {
+                        self.sprite_patterns_low[i] <<= 1;
+                        self.sprite_patterns_high[i] <<= 1;
+                    }
+                }
+            };
+        }
+
+        // to call on scanlines 0..=239 and 261, dots 1..=256 and 321..=336
+        // Note: https://www.nesdev.org/wiki/PPU_rendering says that:
+        // > The shifters are reloaded during ticks 9, 17, 25, ..., 257.
+        // However, loading shift registers at the end of ticks 8, 16, 24, ...,
+        // 256 gives the same result, and avoids additional dot comparisons.
+        macro_rules! load_pattern_and_attribute_shift_registers {
+            () => {
+                if self.dot & 0b111 == 0 {
+                    self.pattern_low_shift_register |= self.bg_tile_byte_low as u16;
+                    self.pattern_high_shift_register |= self.bg_tile_byte_high as u16;
+                    self.attribute_low_shift_register |= if self.attribute & 0b01 > 0 {
+                        0xFF
+                    } else {
+                        0x00
+                    };
+                    self.attribute_high_shift_register |= if self.attribute & 0b10 > 0 {
+                        0xFF
+                    } else {
+                        0x00
+                    };
+                }
+            };
+        }
+
+        // It turns out that minimizing the number of scanline and dot
+        // comparisons can save a lot of CPU time. My strategy here is to
+        // divide scanline-dot space into multiple regions with distict PPU
+        // logic. I check scaline boundaries first, in big-to-small range
+        // order. Then I check dot boundaries, again, in big-to-small range
+        // order. That way the code handling 75% of scanline-dot space
+        // (A1 + B1) is reached with 2 integer comparisons.
+        //
+        // Visualization of regions (not to scale)
+        //
+        // dots -->          0-256             257-320    321-336  337-340
+        // scanlines   0-239 +-----------------+----------+--------+------+
+        // |                 |                 |          |        |      |
+        // V                 |                 |          |        |      |
+        //                   |                 |          |        |      |
+        //                   |        A1       |    A2    |   A3   |  A4  |
+        //                   |                 |          |        |      |
+        //                   |                 |          |        |      |
+        //                   |                 |          |        |      |
+        //           240-260 +-----------------+----------+--------+------+
+        //                   |                                            |
+        //                   |                      B1                    |
+        //                   |                                            |
+        //               261 +-----------------+----------+--------+------+
+        //                   |        C1       |    C2    |   C3   |  C4  |
+        //                   +-----------------+----------+--------+------+
+
+        if self.scanline < 240 {
+            if self.dot < 257 {
+                // region A1
+                if self.dot > 0 {
+                    if self.dot == 64 {
+                        self.clear_secondary_oam();
+                    } else if self.dot == 256 {
+                        self.evaluate_sprites();
+                    }
+                    draw_pixel!();
+                    fetch_background_tiles!();
+                    rotate_pattern_and_attribute_shift_registers!();
+                    load_pattern_and_attribute_shift_registers!();
+                    rotate_sprite_patterns!();
+                }
+                self.dot += 1;
+            } else if self.dot < 321 {
+                // region A2
+                fetch_sprites!();
+                if self.dot == 320 {
+                    fetch_sprites_8_64!();
+                } else if self.dot == 257 {
+                    update_scroll_horizontal!();
+                }
+                self.dot += 1;
+            } else if self.dot < 337 {
+                // region A3
+                fetch_background_tiles!();
+                rotate_pattern_and_attribute_shift_registers!();
+                load_pattern_and_attribute_shift_registers!();
+                self.dot += 1;
             } else {
-                self.scanline += 1;
+                // region A4
+                if self.dot & 1 == 1 {
+                    self.nametable_byte = ppu_bus.read(0x2000 + (self.v.0 & 0x0FFF));
+                }
+                if self.dot == 340 {
+                    self.dot = 0;
+                    self.scanline += 1;
+                } else {
+                    self.dot += 1;
+                }
             }
-        } else {
-            self.dot += 1;
+        } else if self.scanline < 261 {
+            // region B1
+            if self.scanline == 241 && self.dot == 1 {
+                start_vblank!();
+            }
+            if self.dot == 340 {
+                self.dot = 0;
+                self.scanline += 1;
+            } else {
+                self.dot += 1;
+            }
+        } else
+        /* self.scanline == 261 */
+        {
+            // region C1
+            if self.dot < 257 {
+                if self.dot > 0 {
+                    if self.dot == 1 {
+                        end_vblank!();
+                    }
+                    fetch_background_tiles!();
+                    rotate_pattern_and_attribute_shift_registers!();
+                    load_pattern_and_attribute_shift_registers!();
+                    rotate_sprite_patterns!();
+                }
+                self.dot += 1;
+            } else if self.dot < 321 {
+                // region C2
+                fetch_sprites!();
+                if self.dot == 320 {
+                    fetch_sprites_8_64!();
+                } else if self.dot == 257 {
+                    update_scroll_horizontal!();
+                } else if self.dot >= 280 && self.dot <= 304 {
+                    update_scroll_vertical!();
+                }
+                self.dot += 1;
+            } else if self.dot < 337 {
+                // region C3
+                fetch_background_tiles!();
+                rotate_pattern_and_attribute_shift_registers!();
+                load_pattern_and_attribute_shift_registers!();
+                self.dot += 1;
+            } else {
+                // region C4
+                if self.dot & 1 == 1 {
+                    self.nametable_byte = ppu_bus.read(0x2000 + (self.v.0 & 0x0FFF));
+                }
+                if self.dot == 340 {
+                    self.scanline = 0;
+                    // On odd frames scanline 261 dot 340 should be skipped.
+                    // However, it's easier to run it normally and then skip
+                    // to scanline 0 dot 1
+                    self.dot = self.odd as u16;
+                    self.odd = !self.odd;
+                } else {
+                    self.dot += 1;
+                }
+            }
         }
     }
 
@@ -715,7 +848,7 @@ impl Ppu {
             // number of "correct" sprites.
             self.sprite_secondary_oam[sprites_found * 4 + 0] = y;
 
-            if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+            if between_exc(y, y.saturating_add(sprite_height), self.scanline as u8) {
                 self.sprite_secondary_oam[sprites_found * 4 + 1] = self.oam[n * 4 + 1];
                 self.sprite_secondary_oam[sprites_found * 4 + 2] = self.oam[n * 4 + 2];
                 self.sprite_secondary_oam[sprites_found * 4 + 3] = self.oam[n * 4 + 3];
@@ -741,7 +874,7 @@ impl Ppu {
             n = n_on_overflow;
             while n < 64 {
                 let y = self.oam[n * 4 + m];
-                if (y..y.saturating_add(sprite_height)).contains(&(self.scanline as u8)) {
+                if between_exc(y, y.saturating_add(sprite_height), self.scanline as u8) {
                     self.status_register.set_sprite_overflow_flag(true);
                     break;
                 } else {
@@ -826,4 +959,9 @@ impl Ppu {
             tile_row
         };
     }
+}
+
+#[inline(always)]
+fn between_exc<T: PartialOrd>(start: T, end: T, value: T) -> bool {
+    value >= start && value < end
 }

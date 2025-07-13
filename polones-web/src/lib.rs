@@ -7,12 +7,6 @@ use polones_core::game_file::GameFile;
 use polones_core::nes::{GamepadState, Nes, PortState};
 use utils::set_panic_hook;
 
-// When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
-// allocator.
-#[cfg(feature = "wee_alloc")]
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 static mut STATE: Option<State> = None;
 
 struct State {

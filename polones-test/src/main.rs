@@ -1,48 +1,82 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use polones_core::game_file::GameFile;
 use polones_core::nes::{GamepadState, Nes, PortState};
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Texture, TextureAccess};
+use std::collections::BTreeMap;
 use std::path::Component;
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    rom: String,
-
-    #[arg(short, long)]
-    preview: bool,
-
-    #[arg(short, long)]
-    flamegraph: bool,
+#[derive(Debug, Parser)]
+#[command(name = "polones-test")]
+#[command(about = "Tool for testing polones emulator", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
-impl Args {
-    fn collect(self) -> Vec<String> {
-        let Self {
-            rom,
-            preview,
-            flamegraph,
-        } = self;
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Replay {
+        rom: String,
 
-        let mut args = Vec::new();
-        if preview {
-            args.push("--preview".into());
+        #[arg(short, long)]
+        preview: bool,
+
+        #[arg(short, long)]
+        flamegraph: bool,
+    },
+    Stats {
+        dir: String,
+    },
+}
+
+impl Cli {
+    fn collect(self) -> Vec<String> {
+        match self.command {
+            Commands::Replay {
+                rom,
+                preview,
+                flamegraph,
+            } => {
+                let mut args = vec!["replay".into()];
+                if preview {
+                    args.push("--preview".into());
+                }
+                if flamegraph {
+                    args.push("--flamegraph".into());
+                }
+                args.push(rom);
+                args
+            }
+            Commands::Stats { dir } => {
+                let mut args = vec!["stats".into()];
+                args.push(dir);
+                args
+            }
         }
-        if flamegraph {
-            args.push("--flamegraph".into());
-        }
-        args.push(rom);
-        args
     }
 }
 
 fn main() {
-    let args = Args::parse();
+    let args = Cli::parse();
+    match args.command {
+        Commands::Replay {
+            rom,
+            preview,
+            flamegraph,
+        } => {
+            replay(rom, preview, flamegraph);
+        }
+        Commands::Stats { dir } => {
+            stats(dir);
+        }
+    }
+}
 
+fn replay(rom: String, preview: bool, flamegraph: bool) {
     let rom_filename = {
-        let rom_path = std::path::Path::new(&args.rom);
-        match rom_path.components().last() {
+        let rom_path = std::path::Path::new(&rom);
+        match rom_path.components().next_back() {
             Some(Component::Normal(normal)) => normal.to_string_lossy().into_owned(),
             Some(_) => {
                 eprintln!("Path does not end with normal");
@@ -55,10 +89,13 @@ fn main() {
         }
     };
 
-    if args.flamegraph {
-        let args = Args {
-            flamegraph: false,
-            ..args
+    if flamegraph {
+        let args = Cli {
+            command: Commands::Replay {
+                flamegraph: false,
+                rom,
+                preview,
+            },
         };
 
         let mut flamegraph_command = std::process::Command::new("cargo");
@@ -72,7 +109,7 @@ fn main() {
             "20000".into(),
             "--".into(),
         ];
-        flamegraph_args.extend(args.collect().into_iter());
+        flamegraph_args.extend(args.collect());
         flamegraph_command.args(flamegraph_args);
 
         let mut child = match flamegraph_command.spawn() {
@@ -92,14 +129,14 @@ fn main() {
         std::process::exit(status.code().unwrap_or(1))
     }
 
-    let file_contents = match std::fs::read(&args.rom) {
+    let file_contents = match std::fs::read(&rom) {
         Ok(contents) => contents,
         Err(error) => {
             eprintln!("Could not read ROM file: {error}");
             std::process::exit(1)
         }
     };
-    let game_file = match GameFile::read(args.rom.clone(), file_contents) {
+    let game_file = match GameFile::read(rom.clone(), file_contents) {
         Ok(game_file) => game_file,
         Err(_error) => {
             eprintln!("Could not parse ROM file");
@@ -116,7 +153,7 @@ fn main() {
         }
     };
 
-    let mut preview = if args.preview {
+    let mut preview = if preview {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
 
@@ -146,8 +183,10 @@ fn main() {
     };
 
     let mut nes = Nes::new(game_file).expect("Could not start the game");
-    nes.input.port_1 = PortState::Gamepad(GamepadState::from_byte(inputs.get(0).cloned().unwrap_or(0)));
-    nes.input.port_2 = PortState::Gamepad(GamepadState::from_byte(inputs.get(1).cloned().unwrap_or(0)));
+    nes.input.port_1 =
+        PortState::Gamepad(GamepadState::from_byte(inputs.get(0).cloned().unwrap_or(0)));
+    nes.input.port_2 =
+        PortState::Gamepad(GamepadState::from_byte(inputs.get(1).cloned().unwrap_or(0)));
 
     let start_time = std::time::Instant::now();
 
@@ -168,7 +207,7 @@ fn main() {
                         3 * 256,
                     )
                     .unwrap();
-                canvas.copy(&texture, None, None).unwrap();
+                canvas.copy(texture, None, None).unwrap();
                 canvas.present();
             }
 
@@ -190,4 +229,217 @@ fn main() {
 
     // make sure nes is dropped before texture creator
     drop(nes);
+}
+
+fn stats(dir: String) {
+    enum Outcome {
+        Success { rom: String },
+        Failure { rom: String, r#type: FailureType },
+    }
+
+    enum FailureType {
+        Parse,
+        Start { mapper: u16 },
+        Panic,
+    }
+
+    let mut outcomes: Vec<Outcome> = Vec::new();
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("Could not read files in dir: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                eprintln!("Could not read dir entry: {error}");
+                continue;
+            }
+        };
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+
+        let rom: String = entry.path().to_string_lossy().into_owned();
+
+        let rom_filename = {
+            match entry.path().components().next_back() {
+                Some(Component::Normal(normal)) => normal.to_string_lossy().into_owned(),
+                Some(_) => {
+                    eprintln!("Path does not end with normal");
+                    continue;
+                }
+                None => {
+                    eprintln!("Path is empty");
+                    continue;
+                }
+            }
+        };
+
+        if !rom_filename.ends_with(".nes") {
+            continue;
+        }
+
+        let file_contents = match std::fs::read(entry.path()) {
+            Ok(contents) => contents,
+            Err(error) => {
+                eprintln!("Could not read ROM file: {error}");
+                continue;
+            }
+        };
+
+        let rom_filename_clone = rom_filename.clone();
+
+        let run_result = std::panic::catch_unwind(|| {
+            let game_file = match GameFile::read(rom.clone(), file_contents) {
+                Ok(game_file) => game_file,
+                Err(_error) => {
+                    return Outcome::Failure {
+                        rom: rom_filename,
+                        r#type: FailureType::Parse,
+                    };
+                }
+            };
+            let mapper = game_file.mapper;
+
+            let mut nes = match Nes::new(game_file) {
+                Ok(nes) => nes,
+                Err(_error) => {
+                    return Outcome::Failure {
+                        rom: rom_filename,
+                        r#type: FailureType::Start { mapper },
+                    };
+                }
+            };
+
+            for _ in 0..10_000 {
+                nes.run_one_cpu_tick();
+            }
+
+            Outcome::Success { rom: rom_filename }
+        });
+
+        match run_result {
+            Ok(outcome) => {
+                outcomes.push(outcome);
+            }
+            Err(_error) => {
+                outcomes.push(Outcome::Failure {
+                    rom: rom_filename_clone,
+                    r#type: FailureType::Panic,
+                });
+            }
+        }
+    }
+
+    let mut total = 0;
+    let mut successes = 0;
+    let mut fails_parse = 0;
+    let mut fails_start = 0;
+    let mut fails_start_per_mapper = BTreeMap::<u16, i32>::new();
+    let mut panics = 0;
+
+    for outcome in &outcomes {
+        total += 1;
+        match outcome {
+            Outcome::Success { .. } => successes += 1,
+            Outcome::Failure {
+                r#type: FailureType::Parse,
+                ..
+            } => fails_parse += 1,
+            Outcome::Failure {
+                r#type: FailureType::Start { mapper },
+                ..
+            } => {
+                fails_start += 1;
+                *fails_start_per_mapper.entry(*mapper).or_default() += 1;
+            }
+            Outcome::Failure {
+                r#type: FailureType::Panic,
+                ..
+            } => panics += 1,
+        }
+    }
+
+    println!("Outcome");
+    println!("     Roms tested: {total:>5}");
+
+    if total == 0 {
+        return;
+    }
+
+    println!(
+        "         Working: {successes:>5} ({:>6.2}%)",
+        successes as f32 / total as f32 * 100.0
+    );
+    println!(
+        "Failing at parse: {fails_parse:>5} ({:>6.2}%)",
+        fails_parse as f32 / total as f32 * 100.0
+    );
+    println!(
+        "Failing at start: {fails_start:>5} ({:>6.2}%)",
+        fails_start as f32 / total as f32 * 100.0
+    );
+    println!(
+        "       Panicking: {panics:>5} ({:>6.2}%)",
+        panics as f32 / total as f32 * 100.0
+    );
+
+    if !fails_start_per_mapper.is_empty() {
+        println!();
+        println!("Failures at start per mapper");
+        for (mapper, count) in fails_start_per_mapper.iter() {
+            println!(
+                "{mapper:>3}: {count:>5} ({:>6.2}%)",
+                *count as f32 / fails_start as f32 * 100.0
+            );
+        }
+    }
+
+    if fails_parse > 0 {
+        println!();
+        println!("ROMs that fail at parse");
+        for outcome in &outcomes {
+            if let Outcome::Failure {
+                r#type: FailureType::Parse,
+                rom,
+            } = outcome
+            {
+                println!("{rom}");
+            }
+        }
+    }
+
+    if fails_start > 0 {
+        println!();
+        println!("ROMs that fail at start");
+        for outcome in &outcomes {
+            if let Outcome::Failure {
+                r#type: FailureType::Start { mapper },
+                rom,
+            } = outcome
+            {
+                println!("{rom:<85} (mapper {mapper})");
+            }
+        }
+    }
+
+    if panics > 0 {
+        println!();
+        println!("ROMs that panic");
+        for outcome in &outcomes {
+            if let Outcome::Failure {
+                r#type: FailureType::Panic,
+                rom,
+            } = outcome
+            {
+                println!("{rom}");
+            }
+        }
+    }
 }

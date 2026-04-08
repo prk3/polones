@@ -106,7 +106,7 @@ fn replay(rom: String, preview: bool, flamegraph: bool) {
             "--output".into(),
             format!("../flamegraphs/{rom_filename}.svg"),
             "--freq".into(),
-            "20000".into(),
+            "8000".into(),
             "--".into(),
         ];
         flamegraph_args.extend(args.collect());

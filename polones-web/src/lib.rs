@@ -128,15 +128,17 @@ fn port_state_external_string_to_port_state(string: String) -> PortState {
             down,
             left,
             right,
-        } => PortState::Gamepad(GamepadState {
-            a,
-            b,
-            select,
-            start,
-            up,
-            down,
-            left,
-            right,
+        } => PortState::Gamepad({
+            let mut state = GamepadState::default();
+            state.set_a(a);
+            state.set_b(b);
+            state.set_select(select);
+            state.set_start(start);
+            state.set_up(up);
+            state.set_down(down);
+            state.set_left(left);
+            state.set_right(right);
+            state
         }),
     }
 }

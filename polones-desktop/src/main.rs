@@ -90,97 +90,97 @@ impl SdlGameWindow {
                 keycode: _k @ Some(Keycode::W),
                 ..
             } => {
-                self.gamepad_1.up = true;
+                self.gamepad_1.set_up(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::S),
                 ..
             } => {
-                self.gamepad_1.down = true;
+                self.gamepad_1.set_down(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::A),
                 ..
             } => {
-                self.gamepad_1.left = true;
+                self.gamepad_1.set_left(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::D),
                 ..
             } => {
-                self.gamepad_1.right = true;
+                self.gamepad_1.set_right(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::R),
                 ..
             } => {
-                self.gamepad_1.select = true;
+                self.gamepad_1.set_select(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::T),
                 ..
             } => {
-                self.gamepad_1.start = true;
+                self.gamepad_1.set_start(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::F),
                 ..
             } => {
-                self.gamepad_1.b = true;
+                self.gamepad_1.set_b(true);
             }
             Event::KeyDown {
                 keycode: _k @ Some(Keycode::G),
                 ..
             } => {
-                self.gamepad_1.a = true;
+                self.gamepad_1.set_a(true);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::W),
                 ..
             } => {
-                self.gamepad_1.up = false;
+                self.gamepad_1.set_up(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::S),
                 ..
             } => {
-                self.gamepad_1.down = false;
+                self.gamepad_1.set_down(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::A),
                 ..
             } => {
-                self.gamepad_1.left = false;
+                self.gamepad_1.set_left(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::D),
                 ..
             } => {
-                self.gamepad_1.right = false;
+                self.gamepad_1.set_right(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::R),
                 ..
             } => {
-                self.gamepad_1.select = false;
+                self.gamepad_1.set_select(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::T),
                 ..
             } => {
-                self.gamepad_1.start = false;
+                self.gamepad_1.set_start(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::F),
                 ..
             } => {
-                self.gamepad_1.b = false;
+                self.gamepad_1.set_b(false);
             }
             Event::KeyUp {
                 keycode: _k @ Some(Keycode::G),
                 ..
             } => {
-                self.gamepad_1.a = false;
+                self.gamepad_1.set_a(false);
             }
             _ => {}
         }
@@ -278,7 +278,7 @@ struct Args {
     #[arg(long)]
     start_paused: bool,
 
-    #[arg(long, default_value="3")]
+    #[arg(long, default_value = "3")]
     scale: u32,
 }
 
@@ -528,7 +528,16 @@ fn main() {
     // CPU cycles per frame = 29780.5*
     let audio_samples_per_draw = 59561 * 30 / refresh_rate;
 
-    let default_playback_device_name = get_default_playback_device_name();
+    let mut default_playback_device_name = get_default_playback_device_name();
+
+    // Default playback device name reported by SDL might not be on the list,
+    // in which case using it will lead to an error. We'll catch this case.
+    let mut playback_devices = (0..audio_subsystem.num_audio_playback_devices().unwrap_or(0))
+        .filter_map(|i| audio_subsystem.audio_playback_device_name(i).ok());
+
+    if default_playback_device_name.is_some() && playback_devices.find(|d| d == default_playback_device_name.as_ref().unwrap()).is_none() {
+        default_playback_device_name = None;
+    }
 
     let audio_playback: AudioDevice<AudioRunner> = audio_subsystem
         .open_playback(

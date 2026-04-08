@@ -33,39 +33,33 @@ pub enum PortState {
 }
 
 #[derive(Default, Clone)]
-pub struct GamepadState {
-    pub a: bool,
-    pub b: bool,
-    pub select: bool,
-    pub start: bool,
-    pub up: bool,
-    pub down: bool,
-    pub left: bool,
-    pub right: bool,
-}
+pub struct GamepadState(pub u8);
 
+#[rustfmt::skip]
 impl GamepadState {
+    pub fn a     (&self) -> bool { (self.0 & (1 << 7)) != 0 }
+    pub fn b     (&self) -> bool { (self.0 & (1 << 6)) != 0 }
+    pub fn select(&self) -> bool { (self.0 & (1 << 5)) != 0 }
+    pub fn start (&self) -> bool { (self.0 & (1 << 4)) != 0 }
+    pub fn up    (&self) -> bool { (self.0 & (1 << 3)) != 0 }
+    pub fn down  (&self) -> bool { (self.0 & (1 << 2)) != 0 }
+    pub fn left  (&self) -> bool { (self.0 & (1 << 1)) != 0 }
+    pub fn right (&self) -> bool { (self.0 & (1 << 0)) != 0 }
+
+    pub fn set_a     (&mut self, value: bool) { self.0 = (self.0 & !(1 << 7)) | ((value as u8) << 7); }
+    pub fn set_b     (&mut self, value: bool) { self.0 = (self.0 & !(1 << 6)) | ((value as u8) << 6); }
+    pub fn set_select(&mut self, value: bool) { self.0 = (self.0 & !(1 << 5)) | ((value as u8) << 5); }
+    pub fn set_start (&mut self, value: bool) { self.0 = (self.0 & !(1 << 4)) | ((value as u8) << 4); }
+    pub fn set_up    (&mut self, value: bool) { self.0 = (self.0 & !(1 << 3)) | ((value as u8) << 3); }
+    pub fn set_down  (&mut self, value: bool) { self.0 = (self.0 & !(1 << 2)) | ((value as u8) << 2); }
+    pub fn set_left  (&mut self, value: bool) { self.0 = (self.0 & !(1 << 1)) | ((value as u8) << 1); }
+    pub fn set_right (&mut self, value: bool) { self.0 = (self.0 & !(1 << 0)) | ((value as u8) << 0); }
+
     pub fn to_byte(&self) -> u8 {
-        (self.a as u8) << 7
-            | (self.b as u8) << 6
-            | (self.select as u8) << 5
-            | (self.start as u8) << 4
-            | (self.up as u8) << 3
-            | (self.down as u8) << 2
-            | (self.left as u8) << 1
-            | (self.right as u8) << 0
+        self.0
     }
     pub fn from_byte(byte: u8) -> Self {
-        Self {
-            a: byte & 0b10000000 > 0,
-            b: byte & 0b01000000 > 0,
-            select: byte & 0b00100000 > 0,
-            start: byte & 0b00010000 > 0,
-            up: byte & 0b00001000 > 0,
-            down: byte & 0b00000100 > 0,
-            left: byte & 0b00000010 > 0,
-            right: byte & 0b00000001 > 0,
-        }
+        Self(byte)
     }
 }
 

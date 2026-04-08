@@ -14,7 +14,8 @@ impl Mapper for Mapper000 {
         if game.prg_rom().len() != 16 * 1024 && game.prg_rom().len() != 32 * 1024 {
             return Err("Mapper 000: Unexpected prg rom size");
         }
-        if game.chr_rom().is_none() || game.chr_rom().unwrap().len() != 8 * 1024 {
+        // some roms have non-standard size of 16kib, we'll just use bottom 8kib
+        if game.chr_rom().is_none() || !(game.chr_rom().unwrap().len() == 8 * 1024 || game.chr_rom().unwrap().len() == 16 * 1024) {
             return Err("Mapper 000: Unexpected chr rom size");
         }
         if game.prg_ram_size != None
